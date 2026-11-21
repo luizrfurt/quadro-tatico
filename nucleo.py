@@ -1,4 +1,4 @@
-"""Campo, formações, rotas e arquivos das jogadas.
+"""Campo, formações, rotas e o banco das jogadas.
 
 A janela fica em main.py. Aqui não se abre interface.
 """
@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+import sqlite3
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,11 +21,15 @@ def app_dir() -> Path:
 
 
 class PastaDados:
-    """Pasta das jogadas. Trocar data aponta o quadro para outro diretório."""
+    """Pasta do quadro. Trocar data aponta o banco para outro diretório."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
         self.data = root / "dados"
+
+    @property
+    def database(self) -> Path:
+        return self.data / "quadro.db"
 
     @property
     def last(self) -> Path:
@@ -56,29 +61,25 @@ def normalize_categories(raw) -> list[str]:
     return names
 
 
-def _category_names(categorias) -> list[str]:
-    allowed = {name.casefold(): name for name in DEFAULT_CATEGORIES}
+def _ordered_categories(raw, catalog: list[str]) -> list[str]:
+    allowed = {name.casefold(): name for name in catalog}
     chosen: list[str] = []
-    for name in normalize_categories(categorias):
+    for name in normalize_categories(raw):
         kept = allowed.get(name.casefold())
         if kept and kept not in chosen:
             chosen.append(kept)
-    return [name for name in DEFAULT_CATEGORIES if name in chosen]
+    return [name for name in catalog if name in chosen]
 
 
 def category_text(categorias) -> str:
-    return ", ".join(_category_names(categorias))
+    return ", ".join(_ordered_categories(categorias, category_catalog()))
 
 
 def play_caption(nome: str, categorias) -> str:
-    chosen = _category_names(categorias)
+    chosen = _ordered_categories(categorias, category_catalog())
     if not chosen:
         return nome
     return f"{nome} ({', '.join(chosen)})"
-
-
-def play_files() -> list[Path]:
-    return [path for path in PASTA.data.glob("*.json") if not path.name.startswith(".")]
 
 
 def read_play(path: Path) -> dict | None:
@@ -100,56 +101,338 @@ def play_number(data: dict) -> int | None:
     return None
 
 
-def write_play(path: Path, data: dict) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+_conn: sqlite3.Connection | None = None
+_conn_path: Path | None = None
+_store_ready = False
 
 
-def place_play_id(data: dict, number: int) -> dict:
-    fresh: dict = {}
-    placed = False
-    for key, value in data.items():
-        if key == "id":
+def _connect() -> sqlite3.Connection:
+    global _conn, _conn_path, _store_ready
+    path = PASTA.database
+    if _conn is not None and _conn_path == path:
+        return _conn
+    if _conn is not None:
+        _conn.close()
+    _store_ready = False
+    PASTA.data.mkdir(exist_ok=True)
+    _conn = sqlite3.connect(path)
+    _conn.row_factory = sqlite3.Row
+    _conn.execute("PRAGMA foreign_keys = ON")
+    _conn_path = path
+    return _conn
+
+
+def _setting(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM setting WHERE key = ?", (key,)).fetchone()
+    return None if row is None else str(row["value"])
+
+
+def _put_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO setting (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (key, value),
+    )
+
+
+def _create_store(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS category (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            position INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS play (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            side TEXT NOT NULL DEFAULT 'ataque',
+            notes TEXT NOT NULL DEFAULT '',
+            base TEXT,
+            shapes TEXT NOT NULL DEFAULT '[]',
+            routes TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS play_category (
+            play_id INTEGER NOT NULL REFERENCES play(id) ON DELETE CASCADE,
+            category_id INTEGER NOT NULL REFERENCES category(id) ON DELETE CASCADE,
+            PRIMARY KEY (play_id, category_id)
+        );
+        CREATE TABLE IF NOT EXISTS setting (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS formation_base (
+            id INTEGER PRIMARY KEY,
+            side TEXT NOT NULL,
+            name TEXT NOT NULL,
+            key TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            UNIQUE (side, key)
+        );
+        CREATE TABLE IF NOT EXISTS formation_set (
+            id INTEGER PRIMARY KEY,
+            base_id INTEGER NOT NULL REFERENCES formation_base(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            key TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            UNIQUE (base_id, key)
+        );
+        """
+    )
+
+
+def _seed_categories(conn: sqlite3.Connection) -> None:
+    count = conn.execute("SELECT COUNT(*) AS n FROM category").fetchone()["n"]
+    if count:
+        return
+    names = list(DEFAULT_CATEGORIES)
+    path = PASTA.data / ".categorias.json"
+    try:
+        parsed = normalize_categories(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError):
+        parsed = []
+    if parsed:
+        names = parsed
+    conn.executemany(
+        "INSERT INTO category (name, position) VALUES (?, ?)",
+        [(name, index) for index, name in enumerate(names)],
+    )
+
+
+def _json_list(raw: str) -> list:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _play_dict(row: sqlite3.Row, categorias: list[str]) -> dict:
+    base = row["base"]
+    return {
+        "versao": 1,
+        "id": int(row["id"]),
+        "nome": str(row["name"]),
+        "lado": str(row["side"]),
+        "notas": str(row["notes"]),
+        "categorias": list(categorias),
+        "shapes": _json_list(str(row["shapes"])),
+        "routes": _json_list(str(row["routes"])),
+        "base": str(base) if base else None,
+    }
+
+
+def _catalog(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute("SELECT name FROM category ORDER BY position, id").fetchall()
+    return [str(row["name"]) for row in rows]
+
+
+def _categories_of(conn: sqlite3.Connection, play_id: int) -> list[str]:
+    rows = conn.execute(
+        """
+        SELECT category.name AS name
+        FROM play_category
+        JOIN category ON category.id = play_category.category_id
+        WHERE play_category.play_id = ?
+        ORDER BY category.position, category.id
+        """,
+        (play_id,),
+    ).fetchall()
+    return [str(row["name"]) for row in rows]
+
+
+def _write_play(conn: sqlite3.Connection, data: dict) -> int:
+    name = str(data.get("nome") or "").strip()
+    if not name:
+        raise ValueError("A jogada precisa de um nome.")
+    notes = str(data.get("notas") or "")
+    side = str(data.get("lado") or "ataque") or "ataque"
+    raw_base = data.get("base")
+    base = str(raw_base) if raw_base else None
+    shapes = json.dumps(data.get("shapes") or [], ensure_ascii=False)
+    routes = json.dumps(data.get("routes") or [], ensure_ascii=False)
+    play_id = play_number(data)
+    chosen = _ordered_categories(data.get("categorias"), _catalog(conn))
+    exists = play_id is not None and conn.execute("SELECT 1 FROM play WHERE id = ?", (play_id,)).fetchone()
+    if exists:
+        conn.execute(
+            """
+            UPDATE play
+            SET name = ?, side = ?, notes = ?, base = ?, shapes = ?, routes = ?
+            WHERE id = ?
+            """,
+            (name, side, notes, base, shapes, routes, play_id),
+        )
+    elif play_id is not None:
+        conn.execute(
+            """
+            INSERT INTO play (id, name, side, notes, base, shapes, routes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (play_id, name, side, notes, base, shapes, routes),
+        )
+    else:
+        cursor = conn.execute(
+            """
+            INSERT INTO play (name, side, notes, base, shapes, routes)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (name, side, notes, base, shapes, routes),
+        )
+        play_id = int(cursor.lastrowid)
+    conn.execute("DELETE FROM play_category WHERE play_id = ?", (play_id,))
+    conn.executemany(
+        """
+        INSERT INTO play_category (play_id, category_id)
+        SELECT ?, id FROM category WHERE name = ? COLLATE NOCASE
+        """,
+        [(play_id, item) for item in chosen],
+    )
+    return int(play_id)
+
+
+def _import_json(conn: sqlite3.Connection) -> None:
+    """Copia cada JSON cujo nome ainda não está no banco. O arquivo pode sair depois."""
+    for path in sorted(PASTA.data.glob("*.json"), key=lambda item: item.name.casefold()):
+        if path.name.startswith("."):
             continue
-        if key == "nome" and not placed:
-            fresh["id"] = number
-            placed = True
-        fresh[key] = value
-    if not placed:
-        fresh["id"] = number
-    return fresh
-
-
-def assign_missing_ids() -> None:
-    """Dá id às jogadas que ainda não têm. As primeiras seguem a ordem do nome."""
-    rows: list[tuple[Path, dict, str, int | None]] = []
-    for path in play_files():
         data = read_play(path)
         if data is None:
             continue
-        nome = str(data.get("nome") or path.stem)
-        rows.append((path, data, nome, play_number(data)))
-    used = {number for *_rest, number in rows if number is not None}
-    missing = [row for row in rows if row[3] is None]
-    missing.sort(key=lambda row: row[2].casefold())
-    next_id = 1
-    for path, data, _nome, _number in missing:
-        while next_id in used:
-            next_id += 1
-        write_play(path, place_play_id(data, next_id))
-        used.add(next_id)
-        next_id += 1
-
-
-def next_play_id() -> int:
-    used = []
-    for path in play_files():
-        data = read_play(path)
-        if data is None:
+        if not str(data.get("nome") or "").strip():
+            data["nome"] = path.stem
+        if conn.execute(
+            "SELECT 1 FROM play WHERE name = ? COLLATE NOCASE",
+            (str(data["nome"]).strip(),),
+        ).fetchone():
             continue
-        number = play_number(data)
-        if number is not None:
-            used.append(number)
-    return max(used, default=0) + 1
+        try:
+            conn.execute("SAVEPOINT play_import")
+            _write_play(conn, data)
+            conn.execute("RELEASE play_import")
+        except (sqlite3.Error, ValueError):
+            conn.execute("ROLLBACK TO play_import")
+            conn.execute("RELEASE play_import")
+    if _setting(conn, "last_play") is not None:
+        return
+    try:
+        last_name = Path(PASTA.last.read_text(encoding="utf-8").strip()).stem
+    except OSError:
+        return
+    if not last_name:
+        return
+    row = conn.execute("SELECT id FROM play WHERE name = ? COLLATE NOCASE", (last_name,)).fetchone()
+    if row is not None:
+        _put_setting(conn, "last_play", str(row["id"]))
+
+
+def open_store() -> None:
+    """Abre o banco, cria as tabelas e copia jogadas JSON que ainda não existem."""
+    global _store_ready
+    conn = _connect()
+    if _store_ready:
+        return
+    with conn:
+        _create_store(conn)
+        _seed_categories(conn)
+        _seed_formations(conn)
+        _import_json(conn)
+    _store_ready = True
+
+
+def category_catalog() -> list[str]:
+    open_store()
+    return _catalog(_connect())
+
+
+def stored_plays() -> list[dict]:
+    open_store()
+    conn = _connect()
+    rows = conn.execute("SELECT * FROM play ORDER BY id").fetchall()
+    grouped: dict[int, list[str]] = {}
+    links = conn.execute(
+        """
+        SELECT play_category.play_id AS play_id, category.name AS name
+        FROM play_category
+        JOIN category ON category.id = play_category.category_id
+        ORDER BY category.position, category.id
+        """
+    ).fetchall()
+    for link in links:
+        grouped.setdefault(int(link["play_id"]), []).append(str(link["name"]))
+    return [_play_dict(row, grouped.get(int(row["id"]), [])) for row in rows]
+
+
+def stored_play(play_id: int) -> dict | None:
+    open_store()
+    conn = _connect()
+    row = conn.execute("SELECT * FROM play WHERE id = ?", (play_id,)).fetchone()
+    if row is None:
+        return None
+    return _play_dict(row, _categories_of(conn, play_id))
+
+
+def store_play(data: dict) -> int:
+    open_store()
+    conn = _connect()
+    with conn:
+        return _write_play(conn, data)
+
+
+def remove_play(play_id: int) -> None:
+    open_store()
+    conn = _connect()
+    with conn:
+        conn.execute("DELETE FROM play WHERE id = ?", (play_id,))
+        if _setting(conn, "last_play") == str(play_id):
+            conn.execute("DELETE FROM setting WHERE key = 'last_play'")
+
+
+def play_id_for_name(name: str) -> int | None:
+    open_store()
+    row = _connect().execute(
+        "SELECT id FROM play WHERE name = ? COLLATE NOCASE",
+        (name.strip(),),
+    ).fetchone()
+    return None if row is None else int(row["id"])
+
+
+def remember_play(play_id: int) -> None:
+    open_store()
+    conn = _connect()
+    with conn:
+        _put_setting(conn, "last_play", str(play_id))
+
+
+def remembered_play() -> int | None:
+    open_store()
+    conn = _connect()
+    raw = _setting(conn, "last_play")
+    if raw is None or not raw.isdigit():
+        return None
+    play_id = int(raw)
+    found = conn.execute("SELECT 1 FROM play WHERE id = ?", (play_id,)).fetchone()
+    return play_id if found else None
+
+
+def clear_stored_plays() -> None:
+    open_store()
+    conn = _connect()
+    with conn:
+        conn.execute("DELETE FROM play")
+        conn.execute("DELETE FROM setting WHERE key = 'last_play'")
+
+
+def close_store() -> None:
+    global _conn, _conn_path, _store_ready
+    if _conn is not None:
+        _conn.close()
+    _conn = None
+    _conn_path = None
+    _store_ready = False
 
 
 YARD = 15
@@ -192,6 +475,7 @@ def route_kind_for(name: str) -> str:
         "blockpass": "blockpass",
         "release": "release",
         "dropback": "dropback",
+        "rbrun": "rbrun",
         "sit": "sit",
     }
     return special.get(name, "passe")
@@ -219,6 +503,7 @@ ROUTE_COLOR = {
     "pablock": "#7c3aed",
     "motion": "#1e3a8a",
     "dropback": "#38bdf8",
+    "rbrun": "#ea580c",
 }
 ROUTE_INK = {"laranja": "#ea580c", "verde": "#15803d"}
 ZONE_ALPHA = 88
@@ -241,6 +526,8 @@ PASS_BLOCK_YARDS_PER_SEC = 3.2
 DROP_YARDS_PER_SEC = 4.0
 BLOCK_REACH = 1.5
 RELEASE_HOLD = 1.0
+# O RB espera esse tempo no lugar, para chegar no bloqueio, e só então a bolinha sai.
+RUN_HOLD = 0.6
 
 BLOCK_KINDS = {"bloqueio", "blockrun", "blockpass"}
 # Jarda que o quarterback recua, a partir de onde está. A ponta nunca passa de 5 jardas atrás da linha.
@@ -249,15 +536,21 @@ DROP_TRAVEL = {
     "pistol": 1.6,
     "singleback": 3.2,
     "i": 1.6,
+    "t": 1.6,
     "split": 3.0,
+    "wishbone": 1.6,
+    "flexbone": 1.6,
     "goalline": 1.5,
 }
 DROP_TITLE = {
     "shotgun": "shotgun",
     "pistol": "pistol",
     "singleback": "singleback",
-    "i": "I",
-    "split": "split backs",
+    "i": "I-formation",
+    "t": "T",
+    "split": "splitback",
+    "wishbone": "wishbone",
+    "flexbone": "flexbone",
     "goalline": "goal line",
 }
 
@@ -273,7 +566,7 @@ MIRROR_TEXT = {
 }
 
 HINTS = {
-    "select": "Arraste a peça ou a rota. A rota que sai do jogador vai junto. As setas movem o jogador clicado. Puxe os cantos para redimensionar. Duplo clique escreve dentro. Delete remove.",
+    "select": "Arraste a peça ou a rota. A rota que sai do jogador vai junto. As setas movem o jogador clicado. Com a rota selecionada, elas inclinam o traço em 45°. Puxe os cantos para redimensionar. Duplo clique escreve dentro. Delete remove.",
     "circle": "Clique no campo para colocar um círculo. O texto fica dentro da peça.",
     "square": "Clique no campo para colocar um quadrado. O texto fica dentro da peça.",
     "triangle": "Clique no campo para colocar um triângulo. O texto fica dentro da peça.",
@@ -283,6 +576,7 @@ HINTS = {
     "bloqueio": "Clique os pontos do bloqueio. A ponta ganha uma trave. Enter, botão direito ou Concluir fecha.",
     "playaction": "Tracejado livre do play action. Para o fake com saída, use PA route ou PA block no jogador.",
     "motion": "Desenhe o motion, antes do snap. Depois selecione o jogador e escolha a rota: ela começa no fim.",
+    "blockpath": "Clique o jogador: a linha nasce nele. Cada clique esquerdo continua o traço. Botão direito conclui.",
     "zone:amarelo": "Clique no campo para marcar uma área amarela. Ela fica atrás de tudo, translúcida.",
     "zone:azul": "Clique no campo para marcar uma área azul escura. Ela fica atrás de tudo, translúcida.",
     "zone:celeste": "Clique no campo para marcar uma área azul clara. Ela fica atrás de tudo, translúcida.",
@@ -358,6 +652,68 @@ def straighten_axis(points: list, tolerance: float = 1.25) -> list:
     return output
 
 
+def lean_angle(points: list, lean: int) -> float:
+    """Giro da rota, em radianos. A direita leva o primeiro passo para o lado direito do campo."""
+    if lean not in (-1, 1) or len(points) < 2:
+        return 0.0
+    dx = points[1][0] - points[0][0]
+    dy = points[1][1] - points[0][1]
+    toward_right = -1.0 if dy > abs(dx) else 1.0
+    return math.radians(45) * lean * toward_right
+
+
+def rotate_points(points: list, angle: float) -> list:
+    if abs(angle) < 1e-9 or len(points) < 2:
+        return [list(point) for point in points]
+    sx, sy = float(points[0][0]), float(points[0][1])
+    cosine, sine = math.cos(angle), math.sin(angle)
+    output = [[sx, sy]]
+    for point in points[1:]:
+        vx, vy = float(point[0]) - sx, float(point[1]) - sy
+        output.append([sx + vx * cosine - vy * sine, sy + vx * sine + vy * cosine])
+    return output
+
+
+def unwind_point(origin: list, angle: float, x: float, y: float) -> list[float]:
+    """O ponto visto na tela volta para o desenho sem inclinação."""
+    if abs(angle) < 1e-9:
+        return [x, y]
+    cosine, sine = math.cos(-angle), math.sin(-angle)
+    vx, vy = x - origin[0], y - origin[1]
+    return [origin[0] + vx * cosine - vy * sine, origin[1] + vx * sine + vy * cosine]
+
+
+def follow_shift(route, routes) -> tuple[float, float]:
+    follow = getattr(route, "follow", None)
+    if not follow or not routes:
+        return 0.0, 0.0
+    motion = next((item for item in routes if item.id == follow and len(item.points) >= 2), None)
+    if motion is None:
+        return 0.0, 0.0
+    visual = route_path(motion)
+    return visual[-1][0] - motion.points[-1][0], visual[-1][1] - motion.points[-1][1]
+
+
+def route_path(route, routes=None) -> list:
+    points = route.points
+    lean = getattr(route, "lean", 0) or 0
+    if lean in (-1, 1) and len(points) >= 2:
+        points = rotate_points(points, lean_angle(points, lean))
+    dx, dy = follow_shift(route, routes)
+    if dx or dy:
+        points = [[point[0] + dx, point[1] + dy] for point in points]
+    return points
+
+
+def step_lean(current: int, toward: int) -> int:
+    """Um passo: esquerda, meio, direita. Para na extremidade."""
+    if current not in (-1, 0, 1):
+        current = 0
+    if toward not in (-1, 1):
+        return current
+    return max(-1, min(1, current + toward))
+
+
 def route_length(points: list) -> float:
     total = 0.0
     for start, end in zip(points, points[1:]):
@@ -368,7 +724,7 @@ def route_length(points: list) -> float:
 def yards_per_sec(kind: str) -> float:
     if kind == "motion":
         return MOTION_YARDS_PER_SEC
-    if kind == "blockrun":
+    if kind in ("blockrun", "rbrun"):
         return RUN_BLOCK_YARDS_PER_SEC
     if kind in ("bloqueio", "blockpass"):
         return PASS_BLOCK_YARDS_PER_SEC
@@ -385,7 +741,7 @@ def clock_for(field_px: float, speed: float) -> float:
 def snap_distance(routes: list) -> float:
     """Distância no relógio até o motion acabar."""
     lengths = [
-        clock_for(route_length(route.points), MOTION_YARDS_PER_SEC)
+        clock_for(route_length(route_path(route)), MOTION_YARDS_PER_SEC)
         for route in routes
         if route.kind == "motion" and len(route.points) >= 2
     ]
@@ -406,7 +762,7 @@ def release_block(route) -> float:
     split = _split_at(route, {"release"})
     if split is None:
         return 0.0
-    return route_length(route.points[: split + 1])
+    return route_length(route_path(route)[: split + 1])
 
 
 def release_hold(route) -> float:
@@ -415,9 +771,16 @@ def release_hold(route) -> float:
     return RELEASE_HOLD * PLAY_YARDS_PER_SEC * YARD
 
 
+def run_hold(route) -> float:
+    """Pausa no começo do RB run e do RB path, em distância de relógio."""
+    if getattr(route, "kind", None) != "rbrun":
+        return 0.0
+    return RUN_HOLD * PLAY_YARDS_PER_SEC * YARD
+
+
 def clock_length(route) -> float:
     """Quanto o traço ocupa no relógio, cada trecho na velocidade da sua ação."""
-    points = route.points
+    points = route_path(route)
     length = route_length(points)
     block = release_block(route)
     if block:
@@ -427,6 +790,9 @@ def clock_length(route) -> float:
         fake = route_length(points[: split + 1])
         rest_speed = PLAY_YARDS_PER_SEC if route.kind == "paroute" else PASS_BLOCK_YARDS_PER_SEC
         return clock_for(fake, RUN_BLOCK_YARDS_PER_SEC) + clock_for(length - fake, rest_speed)
+    hold = run_hold(route)
+    if hold:
+        return hold + clock_for(length, yards_per_sec(route.kind))
     return clock_for(length, yards_per_sec(route.kind))
 
 
@@ -471,41 +837,47 @@ def alvo_label(elapsed: float, routes: list) -> str:
     return f"laranja {value:.1f} s"
 
 
-def dot_position(route, traveled: float, snap: float, continued: set[str]) -> tuple[float, float] | None:
-    if len(route.points) < 2:
+def dot_position(route, traveled: float, snap: float, continued: set[str], routes=None) -> tuple[float, float] | None:
+    points = route_path(route, routes)
+    if len(points) < 2:
         return None
     if route.kind == "motion":
-        length = route_length(route.points)
+        length = route_length(points)
         clock = clock_for(length, MOTION_YARDS_PER_SEC)
         if traveled < clock:
-            return point_along(route.points, traveled * MOTION_YARDS_PER_SEC / PLAY_YARDS_PER_SEC)
+            return point_along(points, traveled * MOTION_YARDS_PER_SEC / PLAY_YARDS_PER_SEC)
         if route.id in continued and traveled >= snap:
             return None
-        return point_along(route.points, length)
+        return point_along(points, length)
     if route.follow and traveled < snap:
         return None
     if traveled < snap:
-        return point_along(route.points, 0)
+        return point_along(points, 0)
     along = traveled - snap
     block = release_block(route)
     if block:
         block_clock = clock_for(block, PASS_BLOCK_YARDS_PER_SEC)
         hold = release_hold(route)
         if along <= block_clock:
-            return point_along(route.points, along * PASS_BLOCK_YARDS_PER_SEC / PLAY_YARDS_PER_SEC)
+            return point_along(points, along * PASS_BLOCK_YARDS_PER_SEC / PLAY_YARDS_PER_SEC)
         if along <= block_clock + hold:
-            return point_along(route.points, block)
+            return point_along(points, block)
         covered = block + (along - block_clock - hold)
-        return point_along(route.points, covered)
+        return point_along(points, covered)
     split = _split_at(route, {"paroute", "pablock"})
     if split is not None:
-        fake = route_length(route.points[: split + 1])
+        fake = route_length(points[: split + 1])
         fake_clock = clock_for(fake, RUN_BLOCK_YARDS_PER_SEC)
         if along <= fake_clock:
-            return point_along(route.points, along * RUN_BLOCK_YARDS_PER_SEC / PLAY_YARDS_PER_SEC)
+            return point_along(points, along * RUN_BLOCK_YARDS_PER_SEC / PLAY_YARDS_PER_SEC)
         rest_speed = PLAY_YARDS_PER_SEC if route.kind == "paroute" else PASS_BLOCK_YARDS_PER_SEC
-        return point_along(route.points, fake + (along - fake_clock) * rest_speed / PLAY_YARDS_PER_SEC)
-    return point_along(route.points, along * yards_per_sec(route.kind) / PLAY_YARDS_PER_SEC)
+        return point_along(points, fake + (along - fake_clock) * rest_speed / PLAY_YARDS_PER_SEC)
+    hold = run_hold(route)
+    if hold and along < hold:
+        return point_along(points, 0)
+    if hold:
+        along -= hold
+    return point_along(points, along * yards_per_sec(route.kind) / PLAY_YARDS_PER_SEC)
 
 
 def point_along(points: list, distance: float) -> tuple[float, float]:
@@ -550,85 +922,224 @@ def filename_for(name: str) -> str:
     return (cleaned[:80] or "jogada") + ".json"
 
 
-ONE_BACK_SETS = (
-    ("Spread", "spread"),
-    ("Trips", "trips"),
-    ("Bunch", "bunch"),
-    ("Ace", "ace"),
-    ("Doubles", "doubles"),
-    ("Trey", "trey"),
-    ("Wide Bunch", "widebunch"),
+def _set(name: str, key: str, detail: str) -> tuple[str, str, str]:
+    return (name, key, detail)
+
+
+_ONE_BACK = (
+    _set("Spread", "spread", "3 recebedores, 1 tight end e 1 running back. Na linha: X e Y."),
+    _set("Trips", "trips", "trips à direita, tight end do lado oposto. Na linha: Z e Y."),
+    _set("Bunch", "bunch", "bunch à direita: Z no meio, na linha; A e F atrás. Tight end do lado oposto."),
+    _set("Ace", "ace", "2 recebedores, 2 tight ends e 1 running back. Na linha: os dois tight ends."),
+    _set("Doubles", "doubles", "4 recebedores, dois de cada lado, e o running back na proteção. Na linha: X e Z."),
+    _set("Trey", "trey", "4 recebedores em trips e o running back na proteção. Na linha: X e Z."),
+    _set("Wide Bunch", "widebunch", "4 recebedores, bunch à direita, e o running back na proteção. Z no meio, na linha."),
 )
-TWO_BACK_SETS = (
-    ("Pro", "pro"),
-    ("Twins", "twins"),
-    ("Tight", "tight"),
+_TWO_BACK = (
+    _set("Pro", "pro", "2 recebedores, 1 tight end, fullback e halfback. Na linha: X e Y."),
+    _set("Twins", "twins", "dois recebedores do mesmo lado e 1 tight end. Na linha: X e Y."),
+    _set("Tight", "tight", "1 recebedor e 2 tight ends, fullback e halfback. Na linha: os dois tight ends."),
 )
-OFFENSE_BASES = (
-    ("Shotgun", "shotgun"),
-    ("Pistol", "pistol"),
-    ("Singleback", "singleback"),
-    ("I", "i"),
-    ("Split backs", "split"),
-    ("Goal line", "goalline"),
+_FORMATION_SEED = (
+    {
+        "side": "offense",
+        "name": "I-Formation",
+        "key": "i",
+        "sets": _TWO_BACK
+        + (_set("Offset", "ioff", "I com o fullback no lado do tight end e o halfback atrás."),),
+    },
+    {
+        "side": "offense",
+        "name": "T-Formation",
+        "key": "t",
+        "sets": (
+            _set("Tight", "tight", "T fechado: dois tight ends na linha e os três backs lado a lado."),
+            _set("Pro", "pro", "T com o X aberto e o Y na linha. Os três backs continuam lado a lado."),
+        ),
+    },
+    {
+        "side": "offense",
+        "name": "Splitback",
+        "key": "split",
+        "sets": _TWO_BACK
+        + (_set("Near", "near", "split: fullback mais perto da linha, no lado forte; halfback mais fundo."),),
+    },
+    {
+        "side": "offense",
+        "name": "Pistol",
+        "key": "pistol",
+        "sets": _ONE_BACK
+        + (
+            _set("Strong", "strong", "pistol: fullback à direita, ao lado do quarterback, e o halfback atrás."),
+            _set("Jumbo", "pjumbo", "pistol: 1 recebedor (X), 3 tight ends e 1 running back. Na linha: X e Y. U e A recuados."),
+        ),
+    },
+    {
+        "side": "offense",
+        "name": "Goal Line",
+        "key": "goalline",
+        "sets": (
+            _set("Power", "power", "1 recebedor, 2 tight ends, fullback e halfback. Na linha: os dois tight ends."),
+            _set("Jumbo", "jumbo", "1 recebedor, 3 tight ends e 1 running back. Na linha: U e Y. A é o tight end recuado."),
+            _set("Deuce", "gldeuce", "goal line com os dois backs lado a lado. 1 recebedor e 2 tight ends."),
+        ),
+    },
+    {
+        "side": "offense",
+        "name": "Wishbone",
+        "key": "wishbone",
+        "sets": (
+            _set("Tight", "tight", "Wishbone fechado: dois tight ends, fullback atrás do quarterback e os halfbacks mais fundos."),
+            _set("Pro", "pro", "Wishbone com o X aberto e o Y na linha. O fullback fica na frente dos dois halfbacks."),
+        ),
+    },
+    {
+        "side": "offense",
+        "name": "Flexbone",
+        "key": "flexbone",
+        "sets": (
+            _set("Pro", "pro", "Flexbone: X aberto, Y na linha, dois wings fora da linha e o fullback atrás do quarterback."),
+            _set("Tight", "tight", "Flexbone fechado: dois tight ends, wings por fora e o fullback atrás do quarterback."),
+        ),
+    },
+    {
+        "side": "offense",
+        "name": "Shotgun",
+        "key": "shotgun",
+        "sets": _ONE_BACK
+        + (
+            _set("Deuce", "deuce", "shotgun: fullback e halfback, um de cada lado do quarterback."),
+            _set("Offset", "gunoff", "shotgun: halfback ao lado do quarterback, fullback no lado forte."),
+        ),
+    },
+    {
+        "side": "offense",
+        "name": "Singleback",
+        "key": "singleback",
+        "sets": _ONE_BACK
+        + (_set("Offset", "dot", "singleback com o running back deslocado para o lado do tight end."),),
+    },
+    {
+        "side": "defense",
+        "name": "4-3",
+        "key": "43",
+        "sets": (
+            _set("Base", "base", "contra o Ace, dois recebedores"),
+            _set("Nickel", "nickel", "contra o Spread, três recebedores"),
+            _set("Trips", "trips", "nickel e safety em cima do trips"),
+            _set("Bunch", "bunch", "secundário fechado em cima do bunch"),
+            _set("Dime", "dime", "contra 4 recebedores, seis no secundário"),
+        ),
+    },
+    {
+        "side": "defense",
+        "name": "3-4",
+        "key": "34",
+        "sets": (
+            _set("Base", "base", "contra o Ace, dois recebedores"),
+            _set("Nickel", "nickel", "contra o Spread, três recebedores"),
+            _set("Trips", "trips", "nickel e safety em cima do trips"),
+            _set("Bunch", "bunch", "secundário fechado em cima do bunch"),
+            _set("Dime", "dime", "contra 4 recebedores, seis no secundário"),
+        ),
+    },
+    {
+        "side": "defense",
+        "name": "Goal line",
+        "key": "goalline",
+        "sets": (
+            _set("Heavy", "heavy", "contra 1 recebedor, box carregado"),
+            _set("Ace", "ace", "contra 2 recebedores, dois corners"),
+        ),
+    },
 )
-OFFENSE_SETS = {
-    "shotgun": ONE_BACK_SETS + (("Deuce", "deuce"), ("Offset", "gunoff")),
-    "pistol": ONE_BACK_SETS + (("Strong", "strong"), ("Weak", "weak"), ("Jumbo", "pjumbo")),
-    "singleback": ONE_BACK_SETS + (("Offset", "dot"),),
-    "i": TWO_BACK_SETS + (("Offset", "ioff"),),
-    "split": TWO_BACK_SETS + (("Near", "near"),),
-    "goalline": (("Power", "power"), ("Jumbo", "jumbo"), ("Deuce", "gldeuce")),
-}
-BOX_SETS = (
-    ("Base", "base"),
-    ("Nickel", "nickel"),
-    ("Trips", "trips"),
-    ("Bunch", "bunch"),
-    ("Dime", "dime"),
-)
-DEFENSE_BASES = (
-    ("4-3", "43"),
-    ("3-4", "34"),
-    ("Goal line", "goalline"),
-)
-DEFENSE_SETS = {
-    "43": BOX_SETS,
-    "34": BOX_SETS,
-    "goalline": (("Heavy", "heavy"), ("Ace", "ace")),
-}
-OFFENSE_DETAIL = {
-    "spread": "3 recebedores, 1 tight end e 1 running back. Na linha: X e Y.",
-    "trips": "trips à direita, tight end do lado oposto. Na linha: Z e Y.",
-    "bunch": "bunch à direita: Z no meio, na linha; A e F atrás. Tight end do lado oposto.",
-    "ace": "2 recebedores, 2 tight ends e 1 running back. Na linha: os dois tight ends.",
-    "doubles": "4 recebedores, dois de cada lado, e o running back na proteção. Na linha: X e Z.",
-    "trey": "4 recebedores em trips e o running back na proteção. Na linha: X e Z.",
-    "widebunch": "4 recebedores, bunch à direita, e o running back na proteção. Z no meio, na linha.",
-    "strong": "pistol: fullback do lado do tight end, halfback atrás do quarterback.",
-    "weak": "pistol: fullback do lado oposto ao tight end, halfback atrás do quarterback.",
-    "deuce": "shotgun: fullback e halfback, um de cada lado do quarterback.",
-    "gunoff": "shotgun: halfback ao lado do quarterback, fullback no lado forte.",
-    "dot": "singleback com o running back deslocado para o lado do tight end.",
-    "ioff": "I com o fullback no lado do tight end e o halfback atrás.",
-    "near": "split: fullback mais perto da linha, no lado forte; halfback mais fundo.",
-    "gldeuce": "goal line com os dois backs lado a lado. 1 recebedor e 2 tight ends.",
-    "pro": "2 recebedores, 1 tight end, fullback e halfback. Na linha: X e Y.",
-    "twins": "dois recebedores do mesmo lado e 1 tight end. Na linha: X e Y.",
-    "tight": "1 recebedor e 2 tight ends, fullback e halfback. Na linha: os dois tight ends.",
-    "power": "1 recebedor, 2 tight ends, fullback e halfback. Na linha: os dois tight ends.",
-    "jumbo": "1 recebedor, 3 tight ends e 1 running back. Na linha: U e Y. A é o tight end recuado.",
-    "pjumbo": "pistol: 1 recebedor (X), 3 tight ends e 1 running back. Na linha: X e Y. U e A recuados.",
-}
-DEFENSE_DETAIL = {
-    "base": "contra o Ace, dois recebedores",
-    "nickel": "contra o Spread, três recebedores",
-    "trips": "nickel e safety em cima do trips",
-    "bunch": "secundário fechado em cima do bunch",
-    "dime": "contra 4 recebedores, seis no secundário",
-    "heavy": "contra 1 recebedor, box carregado",
-    "ace": "contra 2 recebedores, dois corners",
-}
+
+
+def _seed_formations(conn: sqlite3.Connection) -> None:
+    """Grava base e set que ainda não existem. Linha já salva permanece."""
+    for index, base in enumerate(_FORMATION_SEED):
+        row = conn.execute(
+            "SELECT id FROM formation_base WHERE side = ? AND key = ?",
+            (base["side"], base["key"]),
+        ).fetchone()
+        if row is None:
+            cursor = conn.execute(
+                "INSERT INTO formation_base (side, name, key, position) VALUES (?, ?, ?, ?)",
+                (base["side"], base["name"], base["key"], index),
+            )
+            base_id = int(cursor.lastrowid)
+        else:
+            base_id = int(row["id"])
+        for set_index, (name, key, detail) in enumerate(base["sets"]):
+            found = conn.execute(
+                "SELECT 1 FROM formation_set WHERE base_id = ? AND key = ?",
+                (base_id, key),
+            ).fetchone()
+            if found:
+                continue
+            conn.execute(
+                """
+                INSERT INTO formation_set (base_id, name, key, position, detail)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (base_id, name, key, set_index, detail),
+            )
+
+
+def formation_menu(side: str) -> tuple[list[tuple[str, str]], dict[str, tuple[tuple[str, str], ...]]]:
+    """Nomes que a janela mostra. A ordem e o texto vêm do banco."""
+    open_store()
+    conn = _connect()
+    bases = conn.execute(
+        "SELECT id, name, key FROM formation_base WHERE side = ? ORDER BY position, id",
+        (side,),
+    ).fetchall()
+    menu: list[tuple[str, str]] = []
+    sets: dict[str, tuple[tuple[str, str], ...]] = {}
+    for base in bases:
+        menu.append((str(base["name"]), str(base["key"])))
+        rows = conn.execute(
+            "SELECT name, key FROM formation_set WHERE base_id = ? ORDER BY position, id",
+            (base["id"],),
+        ).fetchall()
+        sets[str(base["key"])] = tuple((str(row["name"]), str(row["key"])) for row in rows)
+    return menu, sets
+
+
+def formation_detail(side: str, base_key: str, set_key: str) -> str:
+    open_store()
+    row = _connect().execute(
+        """
+        SELECT formation_set.detail AS detail
+        FROM formation_set
+        JOIN formation_base ON formation_base.id = formation_set.base_id
+        WHERE formation_base.side = ? AND formation_base.key = ? AND formation_set.key = ?
+        """,
+        (side, base_key, set_key),
+    ).fetchone()
+    return "" if row is None else str(row["detail"])
+
+
+def formation_title(side: str, base_key: str, set_key: str) -> str:
+    bases, sets = formation_menu(side)
+    base_label = dict((key, label) for label, key in bases)[base_key]
+    set_label = dict((key, label) for label, key in sets[base_key])[set_key]
+    return f"{base_label} · {set_label}"
+
+
+def _menu_from_seed(side: str) -> tuple[tuple[tuple[str, str], ...], dict[str, tuple[tuple[str, str], ...]]]:
+    bases = []
+    sets: dict[str, tuple[tuple[str, str], ...]] = {}
+    for item in _FORMATION_SEED:
+        if item["side"] != side:
+            continue
+        bases.append((item["name"], item["key"]))
+        sets[item["key"]] = tuple((name, key) for name, key, _detail in item["sets"])
+    return tuple(bases), sets
+
+
+OFFENSE_BASES, OFFENSE_SETS = _menu_from_seed("offense")
+DEFENSE_BASES, DEFENSE_SETS = _menu_from_seed("defense")
 
 
 def offense_anchors() -> tuple[float, list[float], float, dict[str, float]]:
@@ -674,6 +1185,41 @@ def offense_players(base: str, style: str) -> list[tuple[str, str, float, float,
 
     def add(label: str, cx: float, cy: float) -> None:
         players.append(("circle", label, cx, cy, SKILL_SIZE))
+
+    if base in ("t", "wishbone", "flexbone"):
+        lt, lg, _center, rg, rt = ol_x
+        quarterback_y = LOS_Y + 28
+        if base == "flexbone":
+            if style == "tight":
+                add("U", left_te, on)
+                add("Y", right_te, on)
+                add("A", left_te - 2 * YARD, off)
+                add("H", right_te + 2 * YARD, off)
+            else:
+                add("X", wide_l, on)
+                add("Y", right_te, on)
+                add("A", left_te, off)
+                add("H", right_te + 2 * YARD, off)
+            add("QB", center_x, quarterback_y)
+            add("FB", center_x, LOS_Y + 4.6 * YARD)
+            return players
+        if style == "pro":
+            add("X", wide_l, on)
+            add("Y", right_te, on)
+        else:
+            add("U", left_te, on)
+            add("Y", right_te, on)
+        add("QB", center_x, quarterback_y)
+        if base == "wishbone":
+            add("FB", center_x, LOS_Y + 4 * YARD)
+            add("A", lt, LOS_Y + 6.5 * YARD)
+            add("H", rt, LOS_Y + 6.5 * YARD)
+        else:
+            depth = LOS_Y + 4 * YARD
+            add("A", lg, depth)
+            add("FB", center_x, depth)
+            add("H", rg, depth)
+        return players
 
     backs = "h"
     if style == "spread":
@@ -775,13 +1321,10 @@ def offense_players(base: str, style: str) -> list[tuple[str, str, float, float,
         if backs == "h":
             add("H", center_x + 30, gun_y)
     elif base == "pistol" and style == "strong":
-        add("QB", center_x, LOS_Y + YARD * 4)
+        qb_y = LOS_Y + YARD * 4
+        add("QB", center_x, qb_y)
         add("H", center_x, LOS_Y + YARD * 7)
-        add("FB", rg, LOS_Y + 5.2 * YARD)
-    elif base == "pistol" and style == "weak":
-        add("QB", center_x, LOS_Y + YARD * 4)
-        add("H", center_x, LOS_Y + YARD * 7)
-        add("FB", lg, LOS_Y + 5.2 * YARD)
+        add("FB", center_x + SKILL_SIZE + 4, qb_y)
     elif base == "pistol":
         add("QB", center_x, LOS_Y + YARD * 4)
         if backs == "h":
@@ -1106,6 +1649,11 @@ def route_preset(name: str, cx: float, cy: float, strong: int = 1, screen_yards:
         points = [at(0, 0), at(1.2, 2.2), at(1.2, 3.6)]
     elif name == "playaction":
         points = [at(0, 0), at(1, 3), [cx + 5 * outside * YARD, cy - YARD]]
+    elif name == "rbrun":
+        end_y = LOS_Y - 4 * YARD
+        if cy <= end_y + YARD:
+            end_y = cy - 4 * YARD
+        points = [[cx, cy], [cx, end_y]]
     elif name == "motion":
         points = [at(0, 0), [cx + 8 * inside * YARD, cy]]
     else:
@@ -1208,6 +1756,9 @@ def route_for_player(name: str, label: str, cx: float, cy: float, strong: int = 
 
 
 def route_ending(kind: str, ending: str | None = None) -> str:
+    """A seta é da rota. O motion fica na linha ondulada, sem ponta."""
+    if kind == "motion":
+        return "open"
     if ending in ("arrow", "bar", "ring", "open"):
         return ending
     if kind in BLOCK_KINDS:
@@ -1308,6 +1859,7 @@ class Route:
     color: str | None = None
     follow: str | None = None
     ending: str | None = None
+    lean: int = 0
 
 
 def shape_from_raw(raw: dict) -> Shape:
@@ -1331,6 +1883,12 @@ def route_from_raw(raw: dict) -> Route:
     raw_color = raw.get("color")
     color = raw_color if raw_color in ROUTE_INK else None
     follow = raw.get("follow")
+    try:
+        lean = int(raw.get("lean", 0) or 0)
+    except (TypeError, ValueError):
+        lean = 0
+    if lean not in (-1, 0, 1):
+        lean = 0
     return Route(
         str(raw["id"]),
         str(raw["kind"]),
@@ -1339,6 +1897,7 @@ def route_from_raw(raw: dict) -> Route:
         color,
         str(follow) if follow else None,
         stored_tip(raw.get("ending")),
+        lean,
     )
 
 

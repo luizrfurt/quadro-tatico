@@ -1,15 +1,15 @@
 """Quadro tático de ataque para futebol americano.
 
 Aplicativo desktop para desenhar jogadas: peças, texto e rotas.
-Abra o Quadro tatico.exe nesta pasta. As jogadas ficam em dados.
+Abra o Quadro tatico.exe nesta pasta. As jogadas ficam em dados/quadro.db.
 """
 
 from __future__ import annotations
 
 import copy
-import json
 import math
 import os
+import sqlite3
 import time
 import tkinter as tk
 from dataclasses import asdict
@@ -25,7 +25,7 @@ class QuadroTatico(tk.Tk):
         self._headless = os.environ.get("QUADRO_HEADLESS") == "1"
         if self._headless:
             self.withdraw()
-        PASTA.data.mkdir(exist_ok=True)
+        open_store()
         self.title("Quadro tático — ataque")
         self.geometry("1360x860")
         self.minsize(1200, 780)
@@ -48,7 +48,7 @@ class QuadroTatico(tk.Tk):
         self.redo_stack: list = []
         self._suspend = False
         self.dirty = False
-        self.loaded_path: Path | None = None
+        self.loaded_id: int | None = None
         self.mouse: tuple[float, float] | None = None
         self._last_click_at = 0.0
         self._last_click_pos = (0.0, 0.0)
@@ -58,7 +58,7 @@ class QuadroTatico(tk.Tk):
 
         self.name_var = tk.StringVar()
         self.label_var = tk.StringVar()
-        self.category_names = list(DEFAULT_CATEGORIES)
+        self.category_names = category_catalog()
         self.play_categories: list[str] = []
         self.play_id: int | None = None
         self.snap_var = tk.BooleanVar(value=True)
@@ -66,6 +66,8 @@ class QuadroTatico(tk.Tk):
         self.offense_base: str | None = None
         self.tool_canvases: list[tk.Canvas] = []
         self.route_tip: str | None = None
+        self.block_kind: str | None = None
+        self.block_anchor: str | None = None
         self.tip_buttons: dict = {}
         self._name_before = None
         self._notes_before = None
@@ -78,7 +80,6 @@ class QuadroTatico(tk.Tk):
         self.color_buttons: dict[str, tk.Button] = {}
         self._build()
         self.set_tool("select")
-        assign_missing_ids()
         self.refresh_list()
         self.restore_last()
         self.mark_clean()
@@ -159,8 +160,10 @@ class QuadroTatico(tk.Tk):
             fg="#1c1917",
             font=("Segoe UI", 11, "bold"),
         ).pack(anchor="w", pady=(0, 2))
-        self._formation_pair(tools, "Ataque", OFFENSE_BASES, OFFENSE_SETS, self.insert_formation, first=True)
-        self._formation_pair(tools, "Defesa", DEFENSE_BASES, DEFENSE_SETS, self.insert_defense)
+        offense_bases, offense_sets = formation_menu("offense")
+        defense_bases, defense_sets = formation_menu("defense")
+        self._formation_pair(tools, "Ataque", offense_bases, offense_sets, self.insert_formation, first=True)
+        self._formation_pair(tools, "Defesa", defense_bases, defense_sets, self.insert_defense)
         tk.Checkbutton(
             tools,
             text="Defesa atrás das rotas",
@@ -232,9 +235,13 @@ class QuadroTatico(tk.Tk):
             ("PA block", "pablock"),
             ("Block run", "blockrun"),
             ("Block pass", "blockpass"),
+            ("Run path", "runpath"),
+            ("Pass path", "passpath"),
             ("OL run", "olrun"),
             ("OL pass", "olpass"),
             ("Dropback", "dropback"),
+            ("RB run", "rbrun"),
+            ("RB path", "rbpath"),
         )
         for index, (label, kind) in enumerate(special_actions):
             self._side_button(specials, label, lambda kind=kind: self._player_action(kind), compact=True).grid(
@@ -372,15 +379,21 @@ class QuadroTatico(tk.Tk):
             extra,
             text=(
                 "Rotas: laranja ou verde. Laranja é a principal.\n"
+                "RB run: linha laranja da corrida, no ritmo do bloqueio. Puxe a ponta para o tamanho.\n"
+                "RB run e RB path esperam um instante antes da bolinha sair, para o RB chegar no bloqueio.\n"
+                "RB path desenha a corrida: o clique no jogador gruda a linha e o direito conclui.\n"
                 "Dropback: azul claro. O tamanho muda com a base\n"
                 "e para a no máximo 5 jardas atrás da linha.\n"
                 "Na shotgun, o quarterback já está fundo: o passo é para o lado.\n"
                 "Bloqueio, corrida e passe: trave dourada.\n"
+                "Run path e Pass path desenham o bloqueio: o clique no jogador gruda a linha.\n"
+                "Rota selecionada: setas inclinam qualquer traço 45° à esquerda ou à direita.\n"
                 "Release: dourado no bloqueio, espera, depois a rota.\n"
                 "Play action: roxo. Seta se sai para rota, trave se bloqueia.\n"
                 "Motion: linha azul-escura ondulada.\n"
                 "Auto, seta, trave ou anel escolhem a ponta. Auto mantém a de cada tipo.\n\n"
                 "Selecione um atacante e use a rota pronta.\n"
+                "No Ajuste, o primeiro clique numa peça sai do centro dela.\n"
                 "Play percorre cada traço no ritmo da ação e mostra o tempo.\n"
                 "Laranja conta o tempo da rota principal, até esse jogador terminar.\n"
                 "Flat, wheel e texas de quem não é X, F, Z ou Y chegam na linha em 45°, por fora da OL.\n"
@@ -551,7 +564,7 @@ class QuadroTatico(tk.Tk):
         base_box.grid(row=0, column=0, sticky="ew", padx=(0, 4))
         set_box.grid(row=0, column=1, sticky="ew")
         tk.Label(base_box, text="Base", bg="#fafaf9", fg="#44403c", font=("Segoe UI", 8)).pack(anchor="w")
-        base_combo = ttk.Combobox(base_box, values=base_labels, state="readonly", font=("Segoe UI", 9), width=8)
+        base_combo = ttk.Combobox(base_box, values=base_labels, state="readonly", font=("Segoe UI", 9), width=12)
         base_combo.current(0)
         base_combo.pack(fill="x")
         tk.Label(set_box, text="Set", bg="#fafaf9", fg="#44403c", font=("Segoe UI", 8)).pack(anchor="w")
@@ -687,10 +700,15 @@ class QuadroTatico(tk.Tk):
             self.redraw()
         self.set_status("Próxima rota em laranja." if color == "laranja" else "Próxima rota em verde.")
 
+    def _sketching(self, tool: str | None = None) -> bool:
+        name = self.tool if tool is None else tool
+        return name in ROUTE_TOOLS or name == "blockpath"
+
     def set_tool(self, tool: str) -> None:
-        if tool != self.tool and self.tool in ROUTE_TOOLS and tool not in ROUTE_TOOLS and self.draft:
+        if tool != self.tool and self._sketching() and not self._sketching(tool) and self.draft:
             self.draft = []
             self.draft_follow = None
+            self.block_anchor = None
             self.set_status("Desenho da rota cancelado.")
         self.tool = tool
         for name, button in self.tool_buttons.items():
@@ -764,9 +782,9 @@ class QuadroTatico(tk.Tk):
                     self.draw_shape(shape, self.selection == ("shape", shape.id), faded=True)
         for route in self.routes:
             selected = self.selection == ("route", route.id)
-            self.draw_route(route.kind, route.points, selected, route.split, route.color, route.ending)
+            self.draw_route(route.kind, route_path(route, self.routes), selected, route.split, route.color, route.ending)
             if selected:
-                self.draw_route_handles(route.points)
+                self.draw_route_handles(route_path(route, self.routes))
         for shape in self.shapes:
             if shape.kind == "zone":
                 continue
@@ -1024,12 +1042,13 @@ class QuadroTatico(tk.Tk):
             self.canvas.create_rectangle(x - 5, y - 5, x + 5, y + 5, fill="white", outline="#111111", width=2)
 
     def draw_draft(self) -> None:
-        if not self.draft or self.tool not in ROUTE_TOOLS:
+        if not self.draft or not self._sketching():
             return
         points = [p[:] for p in self.draft]
         if self.mouse is not None:
             points.append([self.mouse[0], self.mouse[1]])
-        color = route_ink(self.tool, self.route_color)
+        kind = self.block_kind if self.tool == "blockpath" and self.block_kind else self.tool
+        color = route_ink(kind, self.route_color)
         screen = [self.to_screen(p[0], p[1]) for p in self.draft]
         for x, y in screen:
             self.canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill=color, outline="#0f172a")
@@ -1100,7 +1119,7 @@ class QuadroTatico(tk.Tk):
     def hit_route(self, x: float, y: float) -> Route | None:
         tolerance = 8 / self.scale
         for route in reversed(self.routes):
-            points = route.points
+            points = route_path(route, self.routes)
             for index in range(len(points) - 1):
                 if dist_to_segment(x, y, points[index], points[index + 1]) <= tolerance:
                     return route
@@ -1110,7 +1129,7 @@ class QuadroTatico(tk.Tk):
         self.layout_field()
         tolerance = 10 / self.scale
         x, y = self.to_logical(event.x, event.y)
-        for index, point in enumerate(route.points):
+        for index, point in enumerate(route_path(route, self.routes)):
             if math.hypot(x - point[0], y - point[1]) <= tolerance:
                 return index
         return None
@@ -1124,6 +1143,28 @@ class QuadroTatico(tk.Tk):
         if not self.selection or self.selection[0] != "route":
             return None
         return next((route for route in self.routes if route.id == self.selection[1]), None)
+
+    def _note_lean(self, route: Route) -> None:
+        if len(route.points) < 2:
+            return
+        place = {-1: "inclinada à esquerda", 0: "no meio", 1: "inclinada à direita"}.get(route.lean, "no meio")
+        self.set_status(f"Rota {place}. Seta esquerda e seta direita mudam a inclinação em 45°.")
+
+    def _is_run_arrow(self, route: Route) -> bool:
+        return route.kind == "rbrun" and len(route.points) == 2
+
+    def _path_label(self) -> str:
+        return {"blockrun": "Block run", "blockpass": "Block pass", "rbrun": "RB run"}.get(self.block_kind or "", "Linha")
+
+    def _piece_center(self, x: float, y: float) -> tuple[float, float]:
+        shape = self.hit_shape(x, y)
+        if shape is None:
+            return x, y
+        return shape.x + shape.w / 2, shape.y + shape.h / 2
+
+    def _move_run_tip(self, route: Route, x: float, y: float, angle: float) -> None:
+        shift_x, shift_y = follow_shift(route, self.routes)
+        route.points[-1] = unwind_point(route.points[0], angle, x - shift_x, y - shift_y)
 
     def select(self, kind: str | None, item_id: str | None = None) -> None:
         self.selection = None if kind is None else (kind, item_id or "")
@@ -1211,7 +1252,7 @@ class QuadroTatico(tk.Tk):
         snap = snap_distance(self.routes)
         continued = {route.follow for route in self.routes if route.follow}
         for route in self.routes:
-            found = dot_position(route, traveled, snap, continued)
+            found = dot_position(route, traveled, snap, continued, self.routes)
             if found is None:
                 continue
             x, y = found
@@ -1245,11 +1286,12 @@ class QuadroTatico(tk.Tk):
         if self.playing:
             self.stop_play(quiet=True)
         self.canvas.focus_set()
-        x, y = self.pointer(event, angle=self.tool in ROUTE_TOOLS)
+        x, y = self.pointer(event, angle=self._sketching())
+
         self._before = None
         self.drag = None
 
-        if self.tool in ROUTE_TOOLS:
+        if self._sketching():
             now = time.monotonic()
             if (
                 self.draft
@@ -1259,11 +1301,25 @@ class QuadroTatico(tk.Tk):
                 self.finish_route()
                 self._last_click_at = now
                 return
-            if not self.draft and self.tool != "motion":
+            if self.tool == "blockpath" and not self.draft:
+                shape = self.hit_shape(x, y)
+                if shape is None or shape.side == "defesa" or shape.kind in ("x", "zone"):
+                    self.set_status("Clique um jogador do ataque. O bloqueio nasce nele.")
+                    return
+                self.select("shape", shape.id)
+                self._anchor_block(shape)
+                self._last_click_at = now
+                self._last_click_pos = (event.x, event.y)
+                return
+            if not self.draft and self.tool not in ("motion", "blockpath"):
                 motion = self._active_motion()
                 if motion is not None and motion.points:
                     self.draft = [motion.points[-1][:]]
                     self.draft_follow = motion.id
+            if not self.draft:
+                self.layout_field()
+                hx, hy = self.to_logical(event.x, event.y)
+                x, y = self._piece_center(hx, hy)
             if not self.draft or math.hypot(x - self.draft[-1][0], y - self.draft[-1][1]) >= 4:
                 self.draft.append([x, y])
             self._last_click_at = now
@@ -1271,7 +1327,11 @@ class QuadroTatico(tk.Tk):
             self.mouse = (x, y)
             self.redraw()
             count = len(self.draft)
-            self.set_status(f"Rota com {count} ponto(s). Enter conclui, Backspace volta um ponto.")
+            if self.tool == "blockpath":
+                label = self._path_label()
+                self.set_status(f"{label} com {count} ponto(s). O clique esquerdo continua. O direito conclui.")
+            else:
+                self.set_status(f"Rota com {count} ponto(s). Enter conclui, Backspace volta um ponto.")
             return
 
         if self.tool in SHAPE_TOOLS:
@@ -1292,9 +1352,20 @@ class QuadroTatico(tk.Tk):
         route = self.selected_route()
         if route:
             index = self.hit_route_point(route, event)
+            last = len(route.points) - 1
+            if self._is_run_arrow(route) and index != 0 and (index == last or self.hit_route(x, y) is route):
+                self._before = self.snapshot()
+                self.drag = {"mode": "stretch", "angle": lean_angle(route.points, route.lean)}
+                self.set_status("Puxe a ponta para mudar o tamanho. As setas giram em 45°.")
+                return
             if index is not None:
                 self._before = self.snapshot()
-                self.drag = {"mode": "point", "index": index}
+                self.drag = {
+                    "mode": "point",
+                    "index": index,
+                    "angle": lean_angle(route.points, route.lean) if len(route.points) >= 2 else 0.0,
+                }
+                self._note_lean(route)
                 return
 
         shape = self.hit_shape(x, y)
@@ -1309,7 +1380,12 @@ class QuadroTatico(tk.Tk):
         if found:
             self.select("route", found.id)
             self._before = self.snapshot()
-            self.drag = {"mode": "move-route", "orig": copy.deepcopy(found.points), "mx": x, "my": y}
+            if self._is_run_arrow(found):
+                self.drag = {"mode": "stretch", "angle": lean_angle(found.points, found.lean)}
+                self.set_status("Puxe a ponta para mudar o tamanho. As setas giram em 45°.")
+            else:
+                self.drag = {"mode": "move-route", "orig": copy.deepcopy(found.points), "mx": x, "my": y}
+                self._note_lean(found)
             return
 
         zone = self.hit_zone(x, y)
@@ -1345,7 +1421,21 @@ class QuadroTatico(tk.Tk):
         elif mode == "point":
             route = self.selected_route()
             if route:
-                route.points[self.drag["index"]] = [x, y]
+                index = self.drag["index"]
+                shift_x, shift_y = follow_shift(route, self.routes)
+                if index == 0:
+                    route.points[0] = [x - shift_x, y - shift_y]
+                else:
+                    route.points[index] = unwind_point(
+                        route.points[0],
+                        self.drag.get("angle", 0.0),
+                        x - shift_x,
+                        y - shift_y,
+                    )
+        elif mode == "stretch":
+            route = self.selected_route()
+            if route and len(route.points) >= 2:
+                self._move_run_tip(route, x, y, self.drag.get("angle", 0.0))
         elif mode == "move-route":
             route = self.selected_route()
             if route:
@@ -1394,7 +1484,7 @@ class QuadroTatico(tk.Tk):
         self._before = None
 
     def on_motion(self, event) -> None:
-        if self.tool in ROUTE_TOOLS and self.draft:
+        if self._sketching() and self.draft:
             self.mouse = self.pointer(event, angle=True)
             self.canvas.configure(cursor="crosshair")
             self.redraw()
@@ -1413,7 +1503,7 @@ class QuadroTatico(tk.Tk):
             self.canvas.configure(cursor="arrow")
 
     def on_right(self, event) -> None:
-        if self.tool in ROUTE_TOOLS and self.draft:
+        if self._sketching() and self.draft:
             self.finish_route()
             return
         route = self.selected_route()
@@ -1489,10 +1579,15 @@ class QuadroTatico(tk.Tk):
             self.set_status("A rota precisa de pelo menos dois pontos.")
             return
         before = self.snapshot()
-        kind = self.tool if self.tool in ROUTE_TOOLS else "passe"
-        follow = self.draft_follow if kind != "motion" else None
-        if follow and not any(item.kind == "motion" and item.id == follow for item in self.routes):
+        if self.tool == "blockpath":
+            kind = self.block_kind if self.block_kind in ("blockrun", "blockpass", "rbrun") else "blockrun"
+            self._clear_anchor_routes()
             follow = None
+        else:
+            kind = self.tool if self.tool in ROUTE_TOOLS else "passe"
+            follow = self.draft_follow if kind != "motion" else None
+            if follow and not any(item.kind == "motion" and item.id == follow for item in self.routes):
+                follow = None
         route = Route(
             new_id(),
             kind,
@@ -1502,20 +1597,64 @@ class QuadroTatico(tk.Tk):
             ending=self.route_tip,
         )
         self.routes.append(route)
+        anchor = next((shape for shape in self.shapes if shape.id == self.block_anchor), None)
         self.draft = []
         self.draft_follow = None
         self.mouse = None
+        self.block_anchor = None
+        self.block_kind = None
         self.selection = ("route", route.id)
         self.commit_undo(before)
         self.reload_label()
         self.set_tool("select")
+        if kind in ("blockrun", "blockpass", "rbrun"):
+            label = {"blockrun": "Block run", "blockpass": "Block pass", "rbrun": "RB run"}[kind]
+            who = anchor.text if anchor is not None and anchor.text else "o jogador"
+            self.set_status(f"{label} de {who}. A linha sai dele.")
+            return
         self.set_status("Rota selecionada. Arraste para mover ou puxe um ponto para ajustar.")
+
+    def begin_block_path(self, kind: str) -> None:
+        self.block_kind = kind
+        self.block_anchor = None
+        self.draft = []
+        self.draft_follow = None
+        self.mouse = None
+        self.set_tool("blockpath")
+        shape = self.selected_shape()
+        if shape is not None and shape.side != "defesa" and shape.kind not in ("x", "zone"):
+            self._anchor_block(shape)
+
+    def _anchor_block(self, shape: Shape) -> None:
+        self.block_anchor = shape.id
+        self.draft = [[shape.x + shape.w / 2, shape.y + shape.h / 2]]
+        self.draft_follow = None
+        self.mouse = tuple(self.draft[0])
+        self.sync_route_buttons()
+        self.redraw()
+        who = shape.text or "o jogador"
+        label = {"blockrun": "Block run", "blockpass": "Block pass", "rbrun": "RB run"}.get(self.block_kind, "Linha")
+        self.set_status(f"{label} de {who}. A linha está nele. Clique o percurso. Botão direito conclui.")
+
+    def _clear_anchor_routes(self) -> None:
+        shape = next((item for item in self.shapes if item.id == self.block_anchor), None)
+        if shape is None:
+            return
+        removed = {route.id for route in self.routes if self._starts_on(route, shape)}
+        for route in self.routes:
+            if route.id in removed and route.kind == "motion":
+                removed.update(item.id for item in self.routes if item.follow == route.id)
+        self.routes = [route for route in self.routes if route.id not in removed]
 
     def cancel_draft(self) -> None:
         self.draft = []
         self.draft_follow = None
         self.mouse = None
+        self.block_anchor = None
         self.redraw()
+        if self.tool == "blockpath":
+            self.set_status(HINTS["blockpath"])
+            return
         self.set_status("Rota cancelada.")
 
     def clear_defense(self) -> None:
@@ -1569,7 +1708,7 @@ class QuadroTatico(tk.Tk):
         self.set_status("Seleção removida.")
 
     def insert_formation(self, base: str, style: str) -> None:
-        title = self._pair_title(OFFENSE_BASES, OFFENSE_SETS, base, style)
+        title = formation_title("offense", base, style)
         attack = [shape for shape in self.shapes if shape.side != "defesa" and shape.kind != "zone"]
         if attack or self.routes:
             if not messagebox.askyesno(
@@ -1589,10 +1728,11 @@ class QuadroTatico(tk.Tk):
         self.commit_undo(before)
         self.reload_label()
         self.redraw()
-        self.set_status(f"{title}: {OFFENSE_DETAIL[style]}")
+        detail = formation_detail("offense", base, style)
+        self.set_status(f"{title}: {detail}" if detail else title)
 
     def insert_defense(self, base: str, style: str) -> None:
-        title = self._pair_title(DEFENSE_BASES, DEFENSE_SETS, base, style)
+        title = formation_title("defense", base, style)
         if any(shape.side == "defesa" for shape in self.shapes):
             if not messagebox.askyesno(
                 "Defesa",
@@ -1611,12 +1751,8 @@ class QuadroTatico(tk.Tk):
         self.commit_undo(before)
         self.reload_label()
         self.redraw()
-        self.set_status(f"Defesa {title}: {DEFENSE_DETAIL[style]}")
-
-    def _pair_title(self, bases, sets, base: str, style: str) -> str:
-        base_label = dict((key, label) for label, key in bases)[base]
-        style_label = dict((key, label) for label, key in sets[base])[style]
-        return f"{base_label} · {style_label}"
+        detail = formation_detail("defense", base, style)
+        self.set_status(f"Defesa {title}: {detail}" if detail else f"Defesa {title}")
 
     def _add_player(self, kind: str, cx: float, cy: float, size: float, text: str, side: str = "ataque") -> None:
         self.shapes.append(Shape(new_id(), kind, cx - size / 2, cy - size / 2, size, size, text, side))
@@ -1640,6 +1776,8 @@ class QuadroTatico(tk.Tk):
         for route in self.routes:
             for point in route.points:
                 point[0] = FIELD_W - point[0]
+            if route.lean in (-1, 1):
+                route.lean = -route.lean
         for point in self.draft:
             point[0] = FIELD_W - point[0]
         self.commit_undo(before)
@@ -1656,11 +1794,15 @@ class QuadroTatico(tk.Tk):
         origin = route.points[0][0]
         for point in route.points:
             point[0] = origin * 2 - point[0]
+        if route.lean in (-1, 1):
+            route.lean = -route.lean
         if route.kind == "motion":
             for follower in self.routes:
                 if follower.follow == route.id:
                     for point in follower.points:
                         point[0] = origin * 2 - point[0]
+                    if follower.lean in (-1, 1):
+                        follower.lean = -follower.lean
         self.commit_undo(before)
         self.redraw()
         self.set_status("Rota espelhada em torno do jogador.")
@@ -1733,6 +1875,8 @@ class QuadroTatico(tk.Tk):
                 point[1] += dy
 
     def add_player_route(self, name: str) -> None:
+        if self.tool == "blockpath":
+            self.set_tool("select")
         shape = self.selected_shape()
         if shape is None or shape.side == "defesa" or shape.kind == "x":
             motion = self.selected_route()
@@ -1787,6 +1931,7 @@ class QuadroTatico(tk.Tk):
             "blockpass": "Block pass",
             "release": "Release",
             "dropback": "Dropback",
+            "rbrun": "RB run",
         }
         label = labels.get(name, name.capitalize())
         who = shape.text or "o jogador"
@@ -1804,6 +1949,8 @@ class QuadroTatico(tk.Tk):
             self.set_status(f"Wheel de {who}: sai como a flat até perto da lateral e sobe em balão na go.")
         elif name == "whip":
             self.set_status(f"Whip de {who}: cinco jardas, ameaça para dentro e sai reto para fora.")
+        elif name == "rbrun":
+            self.set_status(f"Corrida de {who}, em laranja, no ritmo do bloqueio.")
         elif name == "dropback":
             yards = abs(route.points[-1][1] - route.points[0][1]) / YARD
             if abs(route.points[-1][0] - route.points[0][0]) > abs(route.points[-1][1] - route.points[0][1]):
@@ -1838,10 +1985,18 @@ class QuadroTatico(tk.Tk):
             self.assign_line("blockrun")
         elif name == "olpass":
             self.assign_line("blockpass")
+        elif name == "runpath":
+            self.begin_block_path("blockrun")
+        elif name == "passpath":
+            self.begin_block_path("blockpass")
+        elif name == "rbpath":
+            self.begin_block_path("rbrun")
         else:
             self.add_player_route(name)
 
     def assign_line(self, name: str) -> None:
+        if self.tool == "blockpath":
+            self.set_tool("select")
         linemen = [
             shape
             for shape in self.shapes
@@ -1888,25 +2043,20 @@ class QuadroTatico(tk.Tk):
         if not name:
             self.set_status("A cópia precisa de um nome.")
             return
-        path = PASTA.data / filename_for(name)
-        if path.exists():
+        owner = play_id_for_name(name)
+        if owner is not None:
             if not messagebox.askyesno("Duplicar jogada", f'Já existe "{name}". Substituir?', parent=self):
                 return
         document = self.play_document()
         document["nome"] = name
-        if path.exists():
-            existing = read_play(path)
-            number = play_number(existing) if existing else None
-            self.play_id = number or next_play_id()
-        else:
-            self.play_id = next_play_id()
-        document["id"] = self.play_id
-        path.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
+        document["id"] = owner
+        self.play_id = store_play(document)
         self._suspend = True
         self.name_var.set(name)
         self._suspend = False
-        self.loaded_path = path
+        self.loaded_id = self.play_id
         self.mark_clean()
+        self.remember_open()
         self.refresh_list()
         self.set_status(f"Cópia salva: {name}. Você está editando a nova jogada.")
 
@@ -1986,22 +2136,13 @@ class QuadroTatico(tk.Tk):
             disposal=2,
         )
 
-    def saved_play_paths(self) -> list[Path]:
-        items: list[tuple[str, Path]] = []
-        for path in PASTA.data.glob("*.json"):
-            if path.name.startswith("."):
-                continue
-            try:
-                nome = json.loads(path.read_text(encoding="utf-8")).get("nome") or path.stem
-            except (OSError, json.JSONDecodeError):
-                nome = path.stem
-            items.append((str(nome).casefold(), path))
-        items.sort()
-        return [path for _nome, path in items]
+    def saved_play_ids(self) -> list[int]:
+        rows = sorted(stored_plays(), key=lambda row: str(row.get("nome") or "").casefold())
+        return [int(row["id"]) for row in rows]
 
     def export_pdf(self) -> None:
-        paths = self.saved_play_paths()
-        if not paths and not self._play_on_screen():
+        play_ids = self.saved_play_ids()
+        if not play_ids and not self._play_on_screen():
             self.set_status("Não há jogadas salvas para o PDF. Salve a jogada e use PDF.")
             return
         path = filedialog.asksaveasfilename(
@@ -2016,11 +2157,11 @@ class QuadroTatico(tk.Tk):
         self.set_status("Gerando o PDF das jogadas...")
         self.update_idletasks()
         try:
-            count, sheets = self.write_pdf(Path(path), paths)
+            count, sheets = self.write_pdf(Path(path), play_ids)
         except Exception as exc:
             messagebox.showerror("Exportar PDF", f"Não foi possível gerar o PDF.\n{exc}", parent=self)
             return
-        screen = self.dirty and (self.loaded_path is not None or self._play_on_screen())
+        screen = self.dirty and (self.loaded_id is not None or self._play_on_screen())
         extra = " A jogada aberta entrou como está na tela." if screen else ""
         self.set_status(f"PDF com {count} jogadas em {sheets} folha(s): {path}.{extra}")
 
@@ -2029,26 +2170,18 @@ class QuadroTatico(tk.Tk):
             return True
         return bool(self.shapes or self.routes)
 
-    def write_pdf(self, path: Path, paths: list[Path]) -> tuple[int, int]:
+    def write_pdf(self, path: Path, play_ids: list[int]) -> tuple[int, int]:
         cards = []
-        open_file = None
-        if self.loaded_path is not None:
-            try:
-                open_file = self.loaded_path.resolve()
-            except OSError:
-                open_file = None
         seen_open = False
-        for file in paths:
-            try:
-                same = open_file is not None and file.resolve() == open_file
-            except OSError:
-                same = False
-            if same:
+        for play_id in play_ids:
+            if self.loaded_id is not None and play_id == self.loaded_id:
                 cards.append(self.render_board(scale=2, with_notes=True))
                 seen_open = True
                 continue
-            data = json.loads(file.read_text(encoding="utf-8"))
-            cards.append(self.render_document(data, file.stem))
+            data = stored_play(play_id)
+            if data is None:
+                continue
+            cards.append(self.render_document(data, str(data.get("nome") or "Jogada")))
         if not seen_open and self._play_on_screen():
             cards.append(self.render_board(scale=2, with_notes=True))
         pages = compose_sheets(cards)
@@ -2226,7 +2359,7 @@ class QuadroTatico(tk.Tk):
             draw = ImageDraw.Draw(image)
 
         for route in routes:
-            screen = [px(point[0], point[1]) for point in route.points]
+            screen = [px(point[0], point[1]) for point in route_path(route, routes)]
             if route.kind == "release" and isinstance(route.split, int) and 0 < route.split < len(screen) - 1:
                 paint_route(screen[: route.split + 1], "bloqueio", "open", route.color)
                 paint_route(screen[route.split :], "passe", route_ending("passe", route.ending), route.color)
@@ -2265,7 +2398,7 @@ class QuadroTatico(tk.Tk):
             continued = {item.follow for item in routes if item.follow}
             dot = max(6, int(7 * scale))
             for route in routes:
-                found = dot_position(route, traveled, snap, continued)
+                found = dot_position(route, traveled, snap, continued, self.routes)
                 if found is None:
                     continue
                 x, y = found
@@ -2351,13 +2484,13 @@ class QuadroTatico(tk.Tk):
             self.sync_dirty()
 
     def _categories_from(self, raw) -> list[str]:
-        allowed = {name.casefold(): name for name in DEFAULT_CATEGORIES}
+        allowed = {name.casefold(): name for name in self.category_names}
         chosen: list[str] = []
         for name in normalize_categories(raw):
             kept = allowed.get(name.casefold())
             if kept and kept not in chosen:
                 chosen.append(kept)
-        return chosen
+        return [name for name in self.category_names if name in chosen]
 
     def _paint_categories(self) -> None:
         host = getattr(self, "category_chips", None)
@@ -2521,78 +2654,53 @@ class QuadroTatico(tk.Tk):
         if not name:
             messagebox.showwarning("Nome da jogada", "Dê um nome para a jogada antes de salvar.", parent=self)
             return False
-        path = PASTA.data / filename_for(name)
-        previous = self.loaded_path if self.loaded_path is not None and self.loaded_path.is_file() else None
-        if path.exists() and path != previous:
+        owner = play_id_for_name(name)
+        if owner is not None and owner != self.loaded_id:
             if not messagebox.askyesno("Substituir jogada", f'Já existe "{name}". Substituir?', parent=self):
                 return False
-        if previous is not None:
-            number = self.play_id
-            if number is None:
-                existing = read_play(previous)
-                number = play_number(existing) if existing else None
-            number = number or next_play_id()
-        elif path.exists():
-            existing = read_play(path)
-            number = play_number(existing) if existing else None
-            number = number or next_play_id()
+        document = self.play_document()
+        if self.loaded_id is None:
+            document["id"] = owner
         else:
-            number = next_play_id()
-        self.play_id = number
-        path.write_text(json.dumps(self.play_document(), ensure_ascii=False, indent=2), encoding="utf-8")
-        renamed = previous is not None and previous != path
-        removed = True
-        if renamed:
-            try:
-                previous.unlink()
-            except OSError:
-                removed = False
-        self.loaded_path = path
+            document["id"] = self.loaded_id
+            if owner is not None and owner != self.loaded_id:
+                remove_play(owner)
+        try:
+            self.play_id = store_play(document)
+        except sqlite3.Error as exc:
+            messagebox.showerror("Salvar jogada", f"Não foi possível salvar.\n{exc}", parent=self)
+            return False
+        self.loaded_id = self.play_id
         self.mark_clean()
         self.remember_open()
         self.refresh_list()
-        if renamed and not removed:
-            self.set_status(f"Jogada salva: {name}. O arquivo antigo continua na lista.")
-        else:
-            self.set_status(f"Jogada salva: {name}")
+        self.set_status(f"Jogada salva: {name}")
         return True
 
     def remember_open(self) -> None:
-        if self.loaded_path is None:
+        if self.loaded_id is None:
             return
-        try:
-            PASTA.data.mkdir(exist_ok=True)
-            PASTA.last.write_text(self.loaded_path.name, encoding="utf-8")
-        except OSError:
-            pass
+        remember_play(self.loaded_id)
 
     def restore_last(self) -> None:
-        try:
-            name = PASTA.last.read_text(encoding="utf-8").strip()
-        except OSError:
-            return
-        path = PASTA.data / name
-        if path.is_file():
-            self.load_path(path)
+        play_id = remembered_play()
+        if play_id is not None:
+            self.load_saved(play_id)
 
     def refresh_list(self) -> None:
-        rows: list[tuple[int, str, Path, str, str]] = []
-        for path in play_files():
-            data = read_play(path)
-            if data is None:
-                rows.append((10**9, path.stem.casefold(), path, path.stem, ""))
-                continue
-            nome = str(data.get("nome") or path.stem)
-            number = play_number(data) or 10**9
-            rows.append((number, nome.casefold(), path, nome, category_text(data.get("categorias"))))
-        rows.sort()
         self.plays.delete(*self.plays.get_children())
-        for number, _key, path, nome, cats in rows:
-            shown = "" if number >= 10**9 else str(number)
-            self.plays.insert("", "end", iid=path.name, values=(shown, nome, cats))
-        if self.loaded_path is not None and self.plays.exists(self.loaded_path.name):
-            self.plays.selection_set(self.loaded_path.name)
-            self.plays.see(self.loaded_path.name)
+        for data in stored_plays():
+            play_id = int(data["id"])
+            nome = str(data.get("nome") or "")
+            self.plays.insert(
+                "",
+                "end",
+                iid=str(play_id),
+                values=(str(play_id), nome, category_text(data.get("categorias"))),
+            )
+        if self.loaded_id is not None and self.plays.exists(str(self.loaded_id)):
+            self.plays.selection_set(str(self.loaded_id))
+            self.plays.see(str(self.loaded_id))
 
     def confirm_discard(self) -> bool:
         if not self.dirty:
@@ -2615,7 +2723,7 @@ class QuadroTatico(tk.Tk):
         self.routes = []
         self.draft = []
         self.selection = None
-        self.loaded_path = None
+        self.loaded_id = None
         self.play_id = None
         self.offense_base = None
         self.dirty = False
@@ -2642,13 +2750,12 @@ class QuadroTatico(tk.Tk):
             return
         if not self.confirm_discard():
             return
-        self.load_path(PASTA.data / selected[0])
+        self.load_saved(int(selected[0]))
 
-    def load_path(self, path: Path) -> None:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            messagebox.showerror("Abrir jogada", "Não foi possível ler esse arquivo.", parent=self)
+    def load_saved(self, play_id: int) -> None:
+        data = stored_play(play_id)
+        if data is None:
+            messagebox.showerror("Abrir jogada", "Não foi possível ler essa jogada.", parent=self)
             return
         self.shapes = []
         for raw in data.get("shapes", []):
@@ -2666,12 +2773,12 @@ class QuadroTatico(tk.Tk):
         self.selection = None
         base = data.get("base")
         self.offense_base = str(base) if base in DROP_TRAVEL else None
-        self.loaded_path = path
+        self.loaded_id = play_id
         self.dirty = False
         self.undo_stack.clear()
         self.redo_stack.clear()
         self._suspend = True
-        self.name_var.set(str(data.get("nome", path.stem)))
+        self.name_var.set(str(data.get("nome", "")))
         self.label_var.set("")
         self.play_id = play_number(data)
         self.play_categories = self._categories_from(data.get("categorias"))
@@ -2690,30 +2797,36 @@ class QuadroTatico(tk.Tk):
         if not selected:
             self.set_status("Escolha uma jogada na lista.")
             return
-        path = PASTA.data / selected[0]
+        play_id = int(selected[0])
         values = self.plays.item(selected[0], "values")
-        nome = values[1] if len(values) > 1 else path.stem
-        if not messagebox.askyesno("Excluir jogada", f'Excluir "{nome}" do disco?', parent=self):
+        nome = values[1] if len(values) > 1 else selected[0]
+        if not messagebox.askyesno("Excluir jogada", f'Excluir "{nome}"?', parent=self):
             return
         try:
-            path.unlink()
-        except OSError:
-            messagebox.showerror("Excluir jogada", "Não foi possível apagar o arquivo.", parent=self)
+            remove_play(play_id)
+        except sqlite3.Error:
+            messagebox.showerror("Excluir jogada", "Não foi possível apagar a jogada.", parent=self)
             return
-        if path == self.loaded_path:
-            self.loaded_path = None
+        if play_id == self.loaded_id:
+            self.loaded_id = None
             self.dirty = True
-        try:
-            if PASTA.last.is_file() and PASTA.last.read_text(encoding="utf-8").strip() == path.name:
-                PASTA.last.unlink()
-        except OSError:
-            pass
         self.refresh_list()
         self.set_status(f"Jogada excluída: {nome}")
 
     def on_arrow(self, event):
         if self.typing() or self.tool != "select":
             return None
+        route = self.selected_route()
+        if route is not None:
+            if event.keysym in ("Left", "Right") and len(route.points) >= 2:
+                if self._nudge_before is None:
+                    self._nudge_before = self.snapshot()
+                toward = -1 if event.keysym == "Left" else 1
+                route.lean = step_lean(route.lean, toward)
+                self.dirty = True
+                self.redraw()
+                self._note_lean(route)
+            return "break"
         shape = self.selected_shape()
         if shape is None:
             return "break"
@@ -2746,6 +2859,9 @@ class QuadroTatico(tk.Tk):
         if self.typing():
             return None
         if self.draft:
+            if self.tool == "blockpath" and len(self.draft) == 1:
+                self.set_status("A linha continua no jogador. Escape cancela.")
+                return "break"
             self.draft.pop()
             self.redraw()
             self.set_status("Último ponto removido." if self.draft else "Rota vazia.")
