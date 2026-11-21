@@ -1,0 +1,458 @@
+{
+  "versao": 1,
+  "id": 8,
+  "nome": "Play 08",
+  "lado": "ataque",
+  "notas": "",
+  "categorias": [],
+  "shapes": [
+    {
+      "id": "7ef051e7",
+      "kind": "square",
+      "x": 333.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "LT",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "2b5412a2",
+      "kind": "square",
+      "x": 361.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "LG",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "f01cc9e0",
+      "kind": "square",
+      "x": 389.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "C",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "a57be41e",
+      "kind": "square",
+      "x": 417.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "RG",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "4b958489",
+      "kind": "square",
+      "x": 445.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "RT",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "35d9d12d",
+      "kind": "circle",
+      "x": 139.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "X",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "5f36ff97",
+      "kind": "circle",
+      "x": 306.0,
+      "y": 462.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "U",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "989d83cf",
+      "kind": "circle",
+      "x": 472.5,
+      "y": 450.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "Y",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "36b76ddf",
+      "kind": "circle",
+      "x": 502.0,
+      "y": 462.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "A",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "3008ddd2",
+      "kind": "circle",
+      "x": 389.0,
+      "y": 499.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "QB",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "8c7bc0bb",
+      "kind": "circle",
+      "x": 389.0,
+      "y": 544.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "H",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "fca636fe",
+      "kind": "x",
+      "x": 282.0,
+      "y": 423.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "E",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "a8ee72f1",
+      "kind": "x",
+      "x": 349.0,
+      "y": 423.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "T",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "74eee651",
+      "kind": "x",
+      "x": 433.0,
+      "y": 423.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "T",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "78dd5a01",
+      "kind": "x",
+      "x": 500.0,
+      "y": 423.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "E",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "b0ff0ced",
+      "kind": "x",
+      "x": 308.0,
+      "y": 381.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "W",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "197c6ad9",
+      "kind": "x",
+      "x": 391.0,
+      "y": 381.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "M",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "1364c888",
+      "kind": "x",
+      "x": 474.0,
+      "y": 381.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "S",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "d41408c7",
+      "kind": "x",
+      "x": 141.0,
+      "y": 381.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "C",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "c928c53c",
+      "kind": "x",
+      "x": 501.0,
+      "y": 381.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "C",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "55f99f04",
+      "kind": "x",
+      "x": 527.0,
+      "y": 321.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "SS",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "6f340ad8",
+      "kind": "x",
+      "x": 255.0,
+      "y": 291.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "FS",
+      "side": "defesa",
+      "tone": ""
+    }
+  ],
+  "routes": [
+    {
+      "id": "d03fc728",
+      "kind": "passe",
+      "points": [
+        [
+          513.0,
+          473.0
+        ],
+        [
+          513.0,
+          383.0
+        ],
+        [
+          423.0,
+          383.0
+        ]
+      ],
+      "split": null,
+      "color": "laranja",
+      "follow": null
+    },
+    {
+      "id": "f720bd55",
+      "kind": "blockpass",
+      "points": [
+        [
+          344.0,
+          458.0
+        ],
+        [
+          344.0,
+          480.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "1d4c9b38",
+      "kind": "blockpass",
+      "points": [
+        [
+          372.0,
+          458.0
+        ],
+        [
+          372.0,
+          480.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "4e35b536",
+      "kind": "blockpass",
+      "points": [
+        [
+          400.0,
+          458.0
+        ],
+        [
+          400.0,
+          480.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "ecec535d",
+      "kind": "blockpass",
+      "points": [
+        [
+          428.0,
+          458.0
+        ],
+        [
+          428.0,
+          480.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "9f93f701",
+      "kind": "blockpass",
+      "points": [
+        [
+          456.0,
+          458.0
+        ],
+        [
+          456.0,
+          480.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "c2fa4d30",
+      "kind": "dropback",
+      "points": [
+        [
+          400.0,
+          510.0
+        ],
+        [
+          400.0,
+          533.0
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "ad45e879",
+      "kind": "blockpass",
+      "points": [
+        [
+          400.0,
+          555.0
+        ],
+        [
+          400.0,
+          577.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "95bdb71f",
+      "kind": "passe",
+      "points": [
+        [
+          317.0,
+          473.0
+        ],
+        [
+          317.0,
+          383.0
+        ],
+        [
+          242.0,
+          383.0
+        ]
+      ],
+      "split": null,
+      "color": "verde",
+      "follow": null
+    },
+    {
+      "id": "e469a976",
+      "kind": "passe",
+      "points": [
+        [
+          483.5,
+          461.0
+        ],
+        [
+          483.5,
+          311.0
+        ],
+        [
+          536.0,
+          251.0
+        ]
+      ],
+      "split": null,
+      "color": "verde",
+      "follow": null
+    },
+    {
+      "id": "bd101545",
+      "kind": "passe",
+      "points": [
+        [
+          150.0,
+          458.0
+        ],
+        [
+          160.5,
+          368.0
+        ],
+        [
+          183.0,
+          233.0
+        ]
+      ],
+      "split": null,
+      "color": "verde",
+      "follow": null
+    }
+  ],
+  "base": "pistol"
+}

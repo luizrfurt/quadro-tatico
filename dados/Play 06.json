@@ -1,0 +1,479 @@
+{
+  "versao": 1,
+  "id": 6,
+  "nome": "Play 06",
+  "lado": "ataque",
+  "notas": "",
+  "categorias": [],
+  "shapes": [
+    {
+      "id": "b74e9412",
+      "kind": "square",
+      "x": 333.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "LT",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "b7fd18f9",
+      "kind": "square",
+      "x": 361.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "LG",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "110ae70a",
+      "kind": "square",
+      "x": 389.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "C",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "5c76909b",
+      "kind": "square",
+      "x": 417.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "RG",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "8f453378",
+      "kind": "square",
+      "x": 445.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "RT",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "0e237c3b",
+      "kind": "circle",
+      "x": 139.0,
+      "y": 462.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "X",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "4d3de880",
+      "kind": "circle",
+      "x": 306.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "U",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "8c9fbdf6",
+      "kind": "circle",
+      "x": 472.0,
+      "y": 447.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "Y",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "21ca6594",
+      "kind": "circle",
+      "x": 639.0,
+      "y": 462.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "Z",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "ad7dcfc3",
+      "kind": "circle",
+      "x": 389.0,
+      "y": 499.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "QB",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "7b4706d5",
+      "kind": "circle",
+      "x": 389.0,
+      "y": 544.0,
+      "w": 22.0,
+      "h": 22.0,
+      "text": "H",
+      "side": "ataque",
+      "tone": ""
+    },
+    {
+      "id": "a7ab247b",
+      "kind": "x",
+      "x": 282.0,
+      "y": 423.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "E",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "327685b9",
+      "kind": "x",
+      "x": 349.0,
+      "y": 423.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "T",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "aa0d7181",
+      "kind": "x",
+      "x": 433.0,
+      "y": 423.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "T",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "975e2938",
+      "kind": "x",
+      "x": 500.0,
+      "y": 423.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "E",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "6d0c8e34",
+      "kind": "x",
+      "x": 308.0,
+      "y": 381.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "W",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "881c8f20",
+      "kind": "x",
+      "x": 391.0,
+      "y": 381.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "M",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "b924b860",
+      "kind": "x",
+      "x": 474.0,
+      "y": 381.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "S",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "d95bf397",
+      "kind": "x",
+      "x": 141.0,
+      "y": 381.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "C",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "2f4ab8e6",
+      "kind": "x",
+      "x": 641.0,
+      "y": 381.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "C",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "ebe1aa77",
+      "kind": "x",
+      "x": 527.0,
+      "y": 321.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "SS",
+      "side": "defesa",
+      "tone": ""
+    },
+    {
+      "id": "fba67a0e",
+      "kind": "x",
+      "x": 255.0,
+      "y": 291.0,
+      "w": 18.0,
+      "h": 18.0,
+      "text": "FS",
+      "side": "defesa",
+      "tone": ""
+    }
+  ],
+  "routes": [
+    {
+      "id": "e2153b69",
+      "kind": "blockpass",
+      "points": [
+        [
+          344.0,
+          458.0
+        ],
+        [
+          344.0,
+          480.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "9bb47acf",
+      "kind": "blockpass",
+      "points": [
+        [
+          372.0,
+          458.0
+        ],
+        [
+          372.0,
+          480.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "e982d1c1",
+      "kind": "blockpass",
+      "points": [
+        [
+          400.0,
+          458.0
+        ],
+        [
+          400.0,
+          480.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "d36fbef8",
+      "kind": "blockpass",
+      "points": [
+        [
+          428.0,
+          458.0
+        ],
+        [
+          428.0,
+          480.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "1df63714",
+      "kind": "blockpass",
+      "points": [
+        [
+          456.0,
+          458.0
+        ],
+        [
+          456.0,
+          480.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "8fd5ee26",
+      "kind": "blockpass",
+      "points": [
+        [
+          483.0,
+          458.0
+        ],
+        [
+          483.0,
+          480.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "f71deb56",
+      "kind": "passe",
+      "points": [
+        [
+          650.0,
+          473.0
+        ],
+        [
+          650.0,
+          383.0
+        ],
+        [
+          560.0,
+          383.0
+        ]
+      ],
+      "split": null,
+      "color": "verde",
+      "follow": null
+    },
+    {
+      "id": "83669609",
+      "kind": "paroute",
+      "points": [
+        [
+          400.0,
+          555.0
+        ],
+        [
+          472.5,
+          420.0
+        ],
+        [
+          607.5,
+          420.0
+        ]
+      ],
+      "split": 1,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "b58819ed",
+      "kind": "dropback",
+      "points": [
+        [
+          400.0,
+          510.0
+        ],
+        [
+          412.5,
+          540.0
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "68fa11ee",
+      "kind": "release",
+      "points": [
+        [
+          317.0,
+          458.0
+        ],
+        [
+          317.0,
+          435.5
+        ],
+        [
+          242.0,
+          413.0
+        ]
+      ],
+      "split": 1,
+      "color": "laranja",
+      "follow": null
+    },
+    {
+      "id": "2ff6df03",
+      "kind": "motion",
+      "points": [
+        [
+          150.0,
+          472.5
+        ],
+        [
+          225.0,
+          472.5
+        ],
+        [
+          150.0,
+          472.5
+        ]
+      ],
+      "split": null,
+      "color": null,
+      "follow": null
+    },
+    {
+      "id": "ffe3186e",
+      "kind": "passe",
+      "points": [
+        [
+          150.0,
+          472.5
+        ],
+        [
+          150.0,
+          322.5
+        ],
+        [
+          202.5,
+          262.5
+        ]
+      ],
+      "split": null,
+      "color": "verde",
+      "follow": "2ff6df03"
+    }
+  ],
+  "base": "pistol"
+}
