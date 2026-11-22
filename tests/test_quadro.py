@@ -164,7 +164,8 @@ class TestCampo(unittest.TestCase):
         self.assertEqual(route_ending("motion", "arrow"), "open")
         self.assertEqual(route_ending("passe", "ring"), "ring")
         self.assertEqual(route_ending("blockpass", "arrow"), "arrow")
-        self.assertEqual(route_kind_for("sit"), "sit")
+        self.assertEqual(route_kind_for("snag"), "snag")
+        self.assertEqual(route_kind_for("sit"), "snag")
         self.assertEqual(route_kind_for("rbrun"), "rbrun")
         self.assertEqual(route_kind_for("slant"), "passe")
         run = nucleo.route_preset("rbrun", 400, nucleo.LOS_Y + 7 * nucleo.YARD)
@@ -228,11 +229,11 @@ class TestCampo(unittest.TestCase):
         snap = nucleo.snap_distance([motion, follower])
         self.assertIsNone(nucleo.dot_position(follower, snap * 0.5, snap, {"m"}, [motion, follower]))
 
-    def test_sit_e_anel_sobrevivem_no_arquivo(self) -> None:
+    def test_snag_e_anel_sobrevivem_no_arquivo(self) -> None:
         route = route_from_raw(
             {"id": "abc", "kind": "sit", "points": [[1, 2], [3, 4]], "ending": "ring"}
         )
-        self.assertEqual(route.kind, "sit")
+        self.assertEqual(route.kind, "snag")
         self.assertEqual(route.ending, "ring")
         self.assertEqual(route.lean, 0)
 
@@ -372,13 +373,13 @@ class TestQuadro(unittest.TestCase):
         self.assertEqual(zone.x, 30)
         self.assertEqual(motion.points[0][0], 121)
 
-    def test_sit_novo_grava_o_tipo(self) -> None:
+    def test_snag_novo_grava_o_tipo(self) -> None:
         app = self.app
         player = Shape("s", "circle", 100, 100, 22, 22, "X", "ataque")
         app.shapes.append(player)
         app.select("shape", player.id)
-        app.add_player_route("sit")
-        self.assertEqual(app.routes[-1].kind, "sit")
+        app.add_player_route("snag")
+        self.assertEqual(app.routes[-1].kind, "snag")
 
     def test_pa_pass_recebe_a_rota_da_arvore(self) -> None:
         app = self.app

@@ -143,6 +143,7 @@ class QuadroTatico(tk.Tk):
         self._header_button(header, "Salvar", self.save_play, primary=True).pack(side="left", padx=4)
         self._header_button(header, "Duplicar", self.duplicate_play).pack(side="left", padx=4)
         self.play_button = self._header_button(header, "Play", self.toggle_play)
+        self._paint_play_button(False)
         self.play_button.pack(side="left", padx=4)
         self._header_button(header, "Imagem", self.export_image).pack(side="right", padx=(4, 12))
         self._header_button(header, "GIF", self.export_gif).pack(side="right", padx=4)
@@ -258,10 +259,10 @@ class QuadroTatico(tk.Tk):
             ("Screen", "screen"),
             ("Seam", "seam"),
             ("Shoot", "shoot"),
-            ("Sit", "sit"),
             ("Skinny", "skinny"),
             ("Slant", "slant"),
             ("Sluggo", "sluggo"),
+            ("Snag", "snag"),
             ("Stick", "stick"),
             ("Swing", "swing"),
             ("Texas", "texas"),
@@ -339,7 +340,7 @@ class QuadroTatico(tk.Tk):
 
         side = tk.Frame(self, bg="#fafaf9", padx=8, pady=8)
         side.grid(row=1, column=2, sticky="nsew")
-        self.grid_columnconfigure(2, minsize=300)
+        self.grid_columnconfigure(2, minsize=420)
         tk.Label(side, text="Jogadas salvas", bg="#fafaf9", fg="#1c1917", font=("Segoe UI", 11, "bold")).pack(
             anchor="w"
         )
@@ -352,7 +353,7 @@ class QuadroTatico(tk.Tk):
         style.configure("Plays.Treeview.Heading", font=("Segoe UI", 9, "bold"))
         self.plays = ttk.Treeview(
             list_wrap,
-            columns=("id", "nome", "categoria"),
+            columns=("id", "nome", "formacao", "categoria"),
             show="headings",
             selectmode="browse",
             style="Plays.Treeview",
@@ -360,14 +361,17 @@ class QuadroTatico(tk.Tk):
         )
         self.plays.heading("id", text="id")
         self.plays.heading("nome", text="nome")
+        self.plays.heading("formacao", text="formação")
         self.plays.heading("categoria", text="categoria")
         self.plays.column("id", width=36, minwidth=36, stretch=False, anchor="center")
-        self.plays.column("nome", width=88, minwidth=60, stretch=True, anchor="w")
-        self.plays.column("categoria", width=140, minwidth=80, stretch=True, anchor="w")
+        self.plays.column("nome", width=100, minwidth=70, stretch=True, anchor="w")
+        self.plays.column("formacao", width=130, minwidth=90, stretch=True, anchor="w")
+        self.plays.column("categoria", width=110, minwidth=70, stretch=True, anchor="w")
         self.plays.pack(side="left", fill="both", expand=True)
         scroll.config(command=self.plays.yview)
         self.plays.bind("<Double-Button-1>", lambda _event: self.open_selected())
         self._side_button(side, "Abrir", self.open_selected).pack(fill="x", pady=2)
+        self._side_button(side, "Renomear jogada", self.rename_saved_play).pack(fill="x", pady=2)
         self._side_button(side, "Excluir jogada", self.delete_saved_play).pack(fill="x", pady=2)
 
         usage = tk.Frame(self, bg="#f5f5f4", padx=8, pady=4)
@@ -604,7 +608,7 @@ class QuadroTatico(tk.Tk):
         if color not in ROUTE_INK:
             return
         route = self.selected_route()
-        if route is not None and route.kind in ("passe", "sit"):
+        if route is not None and route.kind in PASS_KINDS:
             before = self.snapshot()
             route.color = color
             self.route_color = color
@@ -735,14 +739,6 @@ class QuadroTatico(tk.Tk):
 
     def draw_field(self) -> None:
         self._show_field_plate()
-        formation = self.formation_caption()
-        if formation:
-            self.canvas.create_text(
-                *self.to_screen(FIELD_W / 2, FIELD_TOP + 22),
-                text=formation,
-                fill=FIELD_TEXT,
-                font=("Segoe UI", 13, "bold"),
-            )
 
     def _show_field_plate(self) -> None:
         from PIL import ImageTk
@@ -1301,6 +1297,12 @@ class QuadroTatico(tk.Tk):
         if self.snapshot() != before:
             self.commit_undo(before)
 
+    def _paint_play_button(self, running: bool) -> None:
+        if running:
+            self.play_button.configure(text="Parar", bg="#dc2626", activebackground="#b91c1c")
+            return
+        self.play_button.configure(text="Play", bg="#2563eb", activebackground="#1d4ed8")
+
     def toggle_play(self) -> None:
         if self.playing:
             self.stop_play()
@@ -1311,7 +1313,7 @@ class QuadroTatico(tk.Tk):
         self.playing = True
         self.play_elapsed = 0.0
         self._play_last = time.monotonic()
-        self.play_button.configure(text="Parar")
+        self._paint_play_button(True)
         if snap_distance(self.routes) > 0:
             self.set_status("Motion primeiro. As outras rotas saem quando ele termina.")
         else:
@@ -1324,7 +1326,7 @@ class QuadroTatico(tk.Tk):
             self.after_cancel(self._play_job)
             self._play_job = None
         if hasattr(self, "play_button"):
-            self.play_button.configure(text="Play")
+            self._paint_play_button(False)
         if quiet:
             return
         self.redraw()
@@ -2083,7 +2085,7 @@ class QuadroTatico(tk.Tk):
         self.set_status("Rota espelhada em torno do jogador.")
 
     def _starts_on(self, route: Route, shape: Shape) -> bool:
-        if not route.points or route.kind not in ("passe", "sit", "motion", "playaction", "paroute", "pablock", "papass", "dropback", "release", "rbrun", "blitz", *BLOCK_KINDS):
+        if not route.points or route.kind not in (*PASS_KINDS, "motion", "playaction", "paroute", "pablock", "papass", "dropback", "release", "rbrun", "blitz", *BLOCK_KINDS):
             return False
         x, y = route.points[0]
         return shape.x - 8 <= x <= shape.x + shape.w + 8 and shape.y - 8 <= y <= shape.y + shape.h + 8
@@ -2243,7 +2245,7 @@ class QuadroTatico(tk.Tk):
             kind,
             points,
             1 if name in ("release", "paroute", "pablock") else None,
-            self.route_color if kind in ("passe", "release", "sit") else None,
+            self.route_color if kind in (*PASS_KINDS, "release") else None,
             follow_id,
             self.route_tip,
         )
@@ -2266,6 +2268,7 @@ class QuadroTatico(tk.Tk):
             "shoot": "Shoot",
             "sluggo": "Sluggo",
             "skinny": "Skinny",
+            "snag": "Snag",
         }
         label = labels.get(name, name.capitalize())
         who = shape.text or "o jogador"
@@ -2281,8 +2284,8 @@ class QuadroTatico(tk.Tk):
             self.set_status(f"{label} começa no fim do play action. Ela sai quando o play action acaba.")
         elif name == "chair":
             self.set_status(f"Chair de {who}: cinco jardas, 90° para fora e sobe de novo.")
-        elif name == "sit":
-            self.set_status(f"Sit de {who}: entra como a slant e a seta volta para o QB.")
+        elif name == "snag":
+            self.set_status(f"Snag de {who}: entra como a slant e a seta volta para o QB.")
         elif name == "wheel":
             self.set_status(f"Wheel de {who}: sai como a flat até perto da lateral e sobe em balão na go.")
         elif name == "whip":
@@ -2291,7 +2294,8 @@ class QuadroTatico(tk.Tk):
             self.set_status(f"Corrida de {who}, em vermelho, no ritmo do bloqueio.")
         elif name == "dropback":
             yards = abs(route.points[-1][1] - route.points[0][1]) / YARD
-            self.set_status(f"Dropback de {yards:.1f} jarda(s) para trás.")
+            behind = (route.points[-1][1] - LOS_Y) / YARD
+            self.set_status(f"Dropback de {yards:.1f} jarda(s). A ponta fica {behind:.0f} jardas atrás da bola.")
         elif motion is not None:
             self.set_status(f"{label} começa no fim do motion. Os outros só saem quando o motion acaba.")
         else:
@@ -3123,11 +3127,12 @@ class QuadroTatico(tk.Tk):
         for data in stored_plays():
             play_id = int(data["id"])
             nome = str(data.get("nome") or "")
+            formation = formation_label(data.get("base"), data.get("set"))
             self.plays.insert(
                 "",
                 "end",
                 iid=str(play_id),
-                values=(str(play_id), nome, category_text(data.get("categorias"))),
+                values=(str(play_id), nome, formation, category_text(data.get("categorias"))),
             )
         if self.loaded_id is not None and self.plays.exists(str(self.loaded_id)):
             self.plays.selection_set(str(self.loaded_id))
@@ -3226,6 +3231,55 @@ class QuadroTatico(tk.Tk):
         self.redraw()
         self.mark_clean()
         self.set_status(f"Jogada aberta: {self.name_var.get()}")
+
+    def rename_saved_play(self) -> None:
+        selected = self.plays.selection()
+        if not selected:
+            self.set_status("Escolha uma jogada na lista.")
+            return
+        play_id = int(selected[0])
+        values = self.plays.item(selected[0], "values")
+        current = values[1] if len(values) > 1 else ""
+        typed = simpledialog.askstring(
+            "Renomear jogada",
+            "Novo nome:",
+            initialvalue=current,
+            parent=self,
+        )
+        if typed is None:
+            return
+        name = typed.strip()
+        if not name:
+            messagebox.showwarning("Nome da jogada", "Dê um nome para a jogada.", parent=self)
+            return
+        if name == current:
+            self.set_status("O nome continua o mesmo.")
+            return
+        owner = play_id_for_name(name)
+        if owner is not None and owner != play_id:
+            messagebox.showwarning(
+                "Nome da jogada",
+                "Já existe uma jogada com esse nome. Escolha outro.",
+                parent=self,
+            )
+            return
+        data = stored_play(play_id)
+        if data is None:
+            messagebox.showerror("Renomear jogada", "Não foi possível ler essa jogada.", parent=self)
+            return
+        data["nome"] = name
+        data["id"] = play_id
+        try:
+            store_play(data)
+        except (sqlite3.Error, ValueError) as exc:
+            messagebox.showerror("Renomear jogada", f"Não foi possível renomear.\n{exc}", parent=self)
+            return
+        if play_id == self.loaded_id:
+            self._suspend = True
+            self.name_var.set(name)
+            self._suspend = False
+        self.refresh_list()
+        self.set_status(f"Jogada renomeada: {name}")
 
     def delete_saved_play(self) -> None:
         selected = self.plays.selection()

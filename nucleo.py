@@ -496,8 +496,11 @@ SHAPE_TOOLS = ("circle", "square", "triangle", "rectangle")
 ROUTE_TOOLS = ("passe", "bloqueio", "playaction", "motion")
 
 
+PASS_KINDS = ("passe", "snag", "sit")
+
+
 def route_kind_for(name: str) -> str:
-    """Tipo gravado na rota pronta. Sit continua sit. O restante de passe fica passe."""
+    """Tipo gravado na rota pronta. Snag fica snag. O nome antigo sit também. O restante de passe fica passe."""
     special = {
         "motion": "motion",
         "playaction": "playaction",
@@ -509,7 +512,8 @@ def route_kind_for(name: str) -> str:
         "release": "release",
         "dropback": "dropback",
         "rbrun": "rbrun",
-        "sit": "sit",
+        "snag": "snag",
+        "sit": "snag",
     }
     return special.get(name, "passe")
 
@@ -576,7 +580,7 @@ RELEASE_HOLD = 1.0
 RUN_HOLD = 0.6
 
 BLOCK_KINDS = {"bloqueio", "blockrun", "blockpass"}
-# As chaves identificam a base. A flecha do dropback é sempre 4 jardas para trás.
+# As chaves identificam a base. A ponta do dropback para 6 jardas atrás da bola.
 DROP_TRAVEL = {
     "shotgun": 0.5,
     "pistol": 1.6,
@@ -1056,7 +1060,7 @@ def player_mark(side: str, kind: str, text: str, center_y: float | None = None) 
 
 
 def route_ink(kind: str, color: str | None) -> str:
-    if kind in ("passe", "sit"):
+    if kind in PASS_KINDS:
         return ROUTE_INK.get(color or "laranja", ROUTE_INK["laranja"])
     if kind in ROUTE_COLOR:
         return ROUTE_COLOR[kind]
@@ -1070,7 +1074,7 @@ def moving_ink(route) -> str:
         return route_ink("bloqueio", None)
     if route.kind == "release":
         return route_ink("release", None)
-    if route.kind in ("passe", "sit"):
+    if route.kind in PASS_KINDS:
         return route_ink("passe", route.color)
     return route_ink(route.kind, route.color)
 
@@ -1811,7 +1815,7 @@ def route_preset(name: str, cx: float, cy: float, strong: int = 1, screen_yards:
             [cx + 4 * outside * YARD, cy - 4 * YARD],
             [cx - 1 * outside * YARD, cy - 9 * YARD],
         ]
-    elif name == "sit":
+    elif name in ("snag", "sit"):
         points = [at(0, 0), at(0, 2), at(4, 6), at(4.7, 5.1)]
     elif name == "chair":
         points = [
@@ -1967,10 +1971,12 @@ def stored_tip(raw) -> str | None:
 
 
 def dropback_points(cx: float, cy: float, base: str | None = None, backs: list | None = None) -> list[list[float]]:
-    """Flecha reta, sempre 4 jardas para trás de onde o quarterback está."""
+    """A ponta para 6 jardas atrás da bola. Na shotgun isso dá no máximo 2 jardas."""
     del base, backs
-    tip = min(FIELD_BOTTOM - 10, cy + 4 * YARD)
-    return [[cx, cy], [cx, tip]]
+    tip = LOS_Y + 6 * YARD
+    if tip <= cy + 8:
+        tip = cy + 2 * YARD
+    return [[cx, cy], [cx, min(FIELD_BOTTOM - 10, tip)]]
 
 
 def wavy_line(points: list[tuple[float, float]], amplitude: float = 4.5) -> list[tuple[float, float]]:
@@ -2058,9 +2064,12 @@ def route_from_raw(raw: dict) -> Route:
         lean = int(raw.get("lean", 0) or 0)
     except (TypeError, ValueError):
         lean = 0
+    kind = str(raw["kind"])
+    if kind == "sit":
+        kind = "snag"
     return Route(
         str(raw["id"]),
-        str(raw["kind"]),
+        kind,
         points,
         split,
         color,
