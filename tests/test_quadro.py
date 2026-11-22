@@ -41,7 +41,7 @@ class TestBanco(unittest.TestCase):
         )
         (self.tmp / ".ultima").write_text("Play 01.json", encoding="utf-8")
         nucleo.open_store()
-        self.assertEqual(nucleo.category_catalog(), ["long", "1st"])
+        self.assertEqual(nucleo.category_catalog(), ["long", "1st", "corrida", "passe"])
         play = nucleo.stored_play(7)
         self.assertEqual(play["nome"], "Play 01")
         self.assertEqual(play["notas"], "olho")
@@ -60,6 +60,30 @@ class TestBanco(unittest.TestCase):
         nucleo.open_store()
         self.assertIsNotNone(nucleo.play_id_for_name("Play 02"))
         self.assertEqual(nucleo.stored_play(7)["notas"], "olho")
+
+    def test_set_da_formacao_fica_na_jogada(self) -> None:
+        play_id = nucleo.store_play(
+            {"nome": "Pistol Strong", "base": "pistol", "set": "strong", "shapes": [], "routes": []}
+        )
+        saved = nucleo.stored_play(play_id)
+        self.assertEqual(saved["base"], "pistol")
+        self.assertEqual(saved["set"], "strong")
+        self.assertEqual(nucleo.formation_label("pistol", "strong"), "Pistol · Strong")
+        self.assertEqual(nucleo.formation_label("i", None), "I-Formation")
+
+    def test_folha_mostra_nome_e_observacao(self) -> None:
+        from PIL import Image
+
+        card = Image.new("RGB", (200, 120), "white")
+        pages = nucleo.compose_sheets([(card, "01 Z na go", "O Y faz o out e o Z sobe reto na go.")])
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(pages[0].size, (nucleo.SHEET_W, nucleo.SHEET_H))
+        crop = pages[0].crop((40, 28, 760, 140))
+        dark = 0
+        for count, color in crop.getcolors(crop.size[0] * crop.size[1]) or []:
+            if color[0] < 40:
+                dark += count
+        self.assertGreater(dark, 80)
 
     def test_catalogo_de_formacao_fica_no_banco(self) -> None:
         bases, sets = nucleo.formation_menu("offense")
@@ -163,6 +187,33 @@ class TestCampo(unittest.TestCase):
             hold + nucleo.clock_for(42.0, nucleo.yards_per_sec("rbrun")),
         )
 
+    def test_wheel_termina_antes_da_linha_de_10(self) -> None:
+        ten = nucleo.LOS_Y - 10 * nucleo.YARD
+        wide = nucleo.route_for_player("wheel", "Z", 650, nucleo.LOS_Y + 8, 1)
+        back = nucleo.route_for_player("wheel", "H", 400, nucleo.LOS_Y + 7 * nucleo.YARD, 1)
+        for points in (wide, back):
+            end_y = points[-1][1]
+            self.assertGreater(end_y, ten)
+            self.assertLess(end_y, nucleo.LOS_Y)
+
+    def test_pa_pass_segura_a_rota_ate_o_fake_acabar(self) -> None:
+        fake = nucleo.Route("p", "papass", [[0.0, 0.0], [0.0, -30.0]])
+        route = nucleo.Route("r", "passe", [[0.0, -30.0], [0.0, -90.0]], follow="p", color="laranja")
+        routes = [fake, route]
+        wait = nucleo.clock_length(fake)
+        self.assertGreater(wait, 0)
+        self.assertEqual(nucleo.yards_per_sec("papass"), nucleo.RUN_BLOCK_YARDS_PER_SEC)
+        self.assertIsNone(nucleo.dot_position(route, wait * 0.5, 0, {"p"}, routes))
+        moved = nucleo.dot_position(route, wait + nucleo.YARD, 0, {"p"}, routes)
+        self.assertIsNotNone(moved)
+        self.assertLess(moved[1], -30.0)
+        self.assertIsNone(nucleo.dot_position(fake, wait + 1, 0, {"p"}, routes))
+        self.assertGreaterEqual(nucleo.play_distance(routes), wait + nucleo.clock_length(route))
+        motion = nucleo.Route("m", "motion", [[0.0, 0.0], [40.0, 0.0]])
+        follower = nucleo.Route("f", "passe", [[40.0, 0.0], [40.0, -40.0]], follow="m")
+        snap = nucleo.snap_distance([motion, follower])
+        self.assertIsNone(nucleo.dot_position(follower, snap * 0.5, snap, {"m"}, [motion, follower]))
+
     def test_sit_e_anel_sobrevivem_no_arquivo(self) -> None:
         route = route_from_raw(
             {"id": "abc", "kind": "sit", "points": [[1, 2], [3, 4]], "ending": "ring"}
@@ -230,6 +281,7 @@ class TestQuadro(unittest.TestCase):
         app.undo_stack.clear()
         app.redo_stack.clear()
         app.offense_base = None
+        app.offense_set = None
         app.route_tip = None
         app.tool = "select"
         app.block_kind = None
@@ -272,6 +324,14 @@ class TestQuadro(unittest.TestCase):
         self.assertEqual(app.notes_text(), "")
         self.assertFalse(app.dirty)
 
+    def test_corrida_e_passe_nao_ficam_juntos(self) -> None:
+        app = self.app
+        app.toggle_category("corrida")
+        app.toggle_category("passe")
+        self.assertEqual(app.play_categories, ["passe"])
+        app.toggle_category("1st")
+        self.assertEqual(app.play_categories, ["passe", "1st"])
+
     def test_mover_jogador_leva_a_rota_e_a_cobertura_nao(self) -> None:
         app = self.app
         player = Shape("p", "circle", 100, 200, 22, 22, "Z", "ataque")
@@ -295,6 +355,27 @@ class TestQuadro(unittest.TestCase):
         app.select("shape", player.id)
         app.add_player_route("sit")
         self.assertEqual(app.routes[-1].kind, "sit")
+
+    def test_pa_pass_recebe_a_rota_da_arvore(self) -> None:
+        app = self.app
+        player = Shape("s", "circle", 100, 100, 22, 22, "Z", "ataque")
+        app.shapes.append(player)
+        app.select("shape", player.id)
+        app.add_player_route("papass")
+        fake = app.routes[-1]
+        self.assertEqual(fake.kind, "papass")
+        self.assertEqual(route_ending(fake.kind, fake.ending), "open")
+        app.add_player_route("slant")
+        route = app.routes[-1]
+        self.assertEqual(route.follow, fake.id)
+        self.assertEqual(route.points[0], fake.points[-1])
+        self.assertEqual([item.kind for item in app.routes], ["papass", "passe"])
+        app.add_player_route("go")
+        self.assertEqual([item.kind for item in app.routes], ["papass", "passe"])
+        self.assertEqual(app.routes[1].follow, fake.id)
+        app.selection = ("route", fake.id)
+        app.delete_selected()
+        self.assertEqual(app.routes, [])
 
     def test_anel_fica_na_rota_selecionada(self) -> None:
         app = self.app
@@ -398,7 +479,10 @@ class TestQuadro(unittest.TestCase):
             }
         )
         self.assertEqual(nucleo.stored_play(play_id)["categorias"], ["1st", "long"])
-        self.assertEqual(nucleo.category_catalog(), ["1st", "2nd", "3rd", "4th", "short", "long"])
+        self.assertEqual(
+            nucleo.category_catalog(),
+            ["1st", "2nd", "3rd", "4th", "short", "long", "corrida", "passe"],
+        )
 
     def test_pdf_usa_a_tela_e_nao_mexe_na_jogada_aberta(self) -> None:
         from PIL import Image
@@ -432,7 +516,7 @@ class TestQuadro(unittest.TestCase):
             calls.append("tela")
             return Image.new("RGB", (40, 30), "white")
 
-        def document(data, _fallback):
+        def document(data, _fallback, **_kwargs):
             calls.append(str(data.get("nome")))
             return Image.new("RGB", (40, 30), "white")
 

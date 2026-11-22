@@ -37,7 +37,8 @@ class PastaDados:
 
 
 PASTA = PastaDados(app_dir())
-DEFAULT_CATEGORIES = ["1st", "2nd", "3rd", "4th", "short", "long"]
+DEFAULT_CATEGORIES = ["1st", "2nd", "3rd", "4th", "short", "long", "corrida", "passe"]
+PLAY_KINDS = ("corrida", "passe")
 
 
 def clean_category(name: str) -> str:
@@ -184,6 +185,13 @@ def _create_store(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_play_style(conn: sqlite3.Connection) -> None:
+    """O set da formação entra na jogada. Banco antigo só tinha a base."""
+    columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(play)")}
+    if "style" not in columns:
+        conn.execute("ALTER TABLE play ADD COLUMN style TEXT")
+
+
 def _seed_categories(conn: sqlite3.Connection) -> None:
     count = conn.execute("SELECT COUNT(*) AS n FROM category").fetchone()["n"]
     if count:
@@ -200,6 +208,21 @@ def _seed_categories(conn: sqlite3.Connection) -> None:
         "INSERT INTO category (name, position) VALUES (?, ?)",
         [(name, index) for index, name in enumerate(names)],
     )
+    _ensure_play_kinds(conn)
+
+
+def _ensure_play_kinds(conn: sqlite3.Connection) -> None:
+    """Corrida e passe ficam no catálogo mesmo quando o banco já tinha as descidas."""
+    have = {str(row["name"]).casefold() for row in conn.execute("SELECT name FROM category")}
+    position = int(conn.execute("SELECT COALESCE(MAX(position), -1) AS n FROM category").fetchone()["n"]) + 1
+    for name in PLAY_KINDS:
+        if name.casefold() in have:
+            continue
+        conn.execute(
+            "INSERT INTO category (name, position) VALUES (?, ?)",
+            (name, position),
+        )
+        position += 1
 
 
 def _json_list(raw: str) -> list:
@@ -222,6 +245,7 @@ def _play_dict(row: sqlite3.Row, categorias: list[str]) -> dict:
         "shapes": _json_list(str(row["shapes"])),
         "routes": _json_list(str(row["routes"])),
         "base": str(base) if base else None,
+        "set": str(row["style"]) if row["style"] else None,
     }
 
 
@@ -252,6 +276,8 @@ def _write_play(conn: sqlite3.Connection, data: dict) -> int:
     side = str(data.get("lado") or "ataque") or "ataque"
     raw_base = data.get("base")
     base = str(raw_base) if raw_base else None
+    raw_set = data.get("set")
+    style = str(raw_set).strip() if raw_set else None
     shapes = json.dumps(data.get("shapes") or [], ensure_ascii=False)
     routes = json.dumps(data.get("routes") or [], ensure_ascii=False)
     play_id = play_number(data)
@@ -261,26 +287,26 @@ def _write_play(conn: sqlite3.Connection, data: dict) -> int:
         conn.execute(
             """
             UPDATE play
-            SET name = ?, side = ?, notes = ?, base = ?, shapes = ?, routes = ?
+            SET name = ?, side = ?, notes = ?, base = ?, style = ?, shapes = ?, routes = ?
             WHERE id = ?
             """,
-            (name, side, notes, base, shapes, routes, play_id),
+            (name, side, notes, base, style, shapes, routes, play_id),
         )
     elif play_id is not None:
         conn.execute(
             """
-            INSERT INTO play (id, name, side, notes, base, shapes, routes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO play (id, name, side, notes, base, style, shapes, routes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (play_id, name, side, notes, base, shapes, routes),
+            (play_id, name, side, notes, base, style, shapes, routes),
         )
     else:
         cursor = conn.execute(
             """
-            INSERT INTO play (name, side, notes, base, shapes, routes)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO play (name, side, notes, base, style, shapes, routes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (name, side, notes, base, shapes, routes),
+            (name, side, notes, base, style, shapes, routes),
         )
         play_id = int(cursor.lastrowid)
     conn.execute("DELETE FROM play_category WHERE play_id = ?", (play_id,))
@@ -337,7 +363,9 @@ def open_store() -> None:
         return
     with conn:
         _create_store(conn)
+        _ensure_play_style(conn)
         _seed_categories(conn)
+        _ensure_play_kinds(conn)
         _seed_formations(conn)
         _import_json(conn)
     _store_ready = True
@@ -471,6 +499,7 @@ def route_kind_for(name: str) -> str:
         "playaction": "playaction",
         "paroute": "paroute",
         "pablock": "pablock",
+        "papass": "papass",
         "blockrun": "blockrun",
         "blockpass": "blockpass",
         "release": "release",
@@ -501,6 +530,7 @@ ROUTE_COLOR = {
     "playaction": "#7c3aed",
     "paroute": "#7c3aed",
     "pablock": "#7c3aed",
+    "papass": "#7c3aed",
     "motion": "#1e3a8a",
     "dropback": "#38bdf8",
     "rbrun": "#ea580c",
@@ -572,9 +602,9 @@ HINTS = {
     "triangle": "Clique no campo para colocar um triângulo. O texto fica dentro da peça.",
     "rectangle": "Clique no campo para colocar um retângulo. O texto fica dentro da peça.",
     "x": "Clique no campo para colocar um defensor. A letra fica no triângulo de ponta para baixo.",
-    "passe": "Clique os pontos da rota. Se um motion estiver selecionado, ela começa no fim dele. Enter conclui.",
+    "passe": "Clique os pontos da rota. Se um motion ou PA pass estiver selecionado, ela começa no fim dele. Enter conclui.",
     "bloqueio": "Clique os pontos do bloqueio. A ponta ganha uma trave. Enter, botão direito ou Concluir fecha.",
-    "playaction": "Tracejado livre do play action. Para o fake com saída, use PA route ou PA block no jogador.",
+    "playaction": "Tracejado livre do play action. PA pass deixa a rota da árvore sair quando o fake acaba.",
     "motion": "Desenhe o motion, antes do snap. Depois selecione o jogador e escolha a rota: ela começa no fim.",
     "blockpath": "Clique o jogador: a linha nasce nele. Cada clique esquerdo continua o traço. Botão direito conclui.",
     "zone:amarelo": "Clique no campo para marcar uma área amarela. Ela fica atrás de tudo, translúcida.",
@@ -724,7 +754,7 @@ def route_length(points: list) -> float:
 def yards_per_sec(kind: str) -> float:
     if kind == "motion":
         return MOTION_YARDS_PER_SEC
-    if kind in ("blockrun", "rbrun"):
+    if kind in ("blockrun", "rbrun", "papass"):
         return RUN_BLOCK_YARDS_PER_SEC
     if kind in ("bloqueio", "blockpass"):
         return PASS_BLOCK_YARDS_PER_SEC
@@ -771,6 +801,21 @@ def release_hold(route) -> float:
     return RELEASE_HOLD * PLAY_YARDS_PER_SEC * YARD
 
 
+def followed_route(route, routes):
+    follow = getattr(route, "follow", None)
+    if not follow or not routes:
+        return None
+    return next((item for item in routes if item.id == follow and len(item.points) >= 2), None)
+
+
+def papass_wait(route, routes) -> float:
+    """O passe só começa quando o play action que ele segue termina."""
+    leader = followed_route(route, routes)
+    if leader is None or leader.kind != "papass":
+        return 0.0
+    return clock_length(leader)
+
+
 def run_hold(route) -> float:
     """Pausa no começo do RB run e do RB path, em distância de relógio."""
     if getattr(route, "kind", None) != "rbrun":
@@ -802,7 +847,7 @@ def play_distance(routes: list) -> float:
     for route in routes:
         if route.kind == "motion" or len(route.points) < 2:
             continue
-        longest = max(longest, clock_length(route))
+        longest = max(longest, papass_wait(route, routes) + clock_length(route))
     return snap + longest
 
 
@@ -814,7 +859,7 @@ def jogada_seconds(elapsed: float, routes: list) -> float:
 def principal_seconds(routes: list) -> float | None:
     """Tempo da jogada em que a rota laranja acaba. Verde, dropback e bloqueio ficam de fora."""
     times = [
-        clock_length(route) / (PLAY_YARDS_PER_SEC * YARD)
+        (papass_wait(route, routes) + clock_length(route)) / (PLAY_YARDS_PER_SEC * YARD)
         for route in routes
         if len(route.points) >= 2 and route_ink(route.kind, getattr(route, "color", None)) == ROUTE_INK["laranja"]
     ]
@@ -849,11 +894,32 @@ def dot_position(route, traveled: float, snap: float, continued: set[str], route
         if route.id in continued and traveled >= snap:
             return None
         return point_along(points, length)
-    if route.follow and traveled < snap:
+    if route.kind == "papass":
+        if route.follow and traveled < snap:
+            return None
+        if traveled < snap:
+            return point_along(points, 0)
+        along = traveled - snap
+        length = route_length(points)
+        clock = clock_for(length, RUN_BLOCK_YARDS_PER_SEC)
+        if along < clock:
+            return point_along(points, along * RUN_BLOCK_YARDS_PER_SEC / PLAY_YARDS_PER_SEC)
+        if route.id in continued:
+            return None
+        return point_along(points, length)
+    leader = followed_route(route, routes)
+    wait = 0.0
+    if leader is not None and leader.kind == "papass":
+        if traveled < snap:
+            return None
+        wait = clock_length(leader)
+        if traveled - snap < wait:
+            return None
+    elif route.follow and traveled < snap:
         return None
-    if traveled < snap:
+    elif traveled < snap:
         return point_along(points, 0)
-    along = traveled - snap
+    along = traveled - snap - wait
     block = release_block(route)
     if block:
         block_clock = clock_for(block, PASS_BLOCK_YARDS_PER_SEC)
@@ -907,7 +973,7 @@ def route_ink(kind: str, color: str | None) -> str:
 
 
 def moving_ink(route) -> str:
-    if route.kind in ("playaction", "paroute", "pablock"):
+    if route.kind in ("playaction", "paroute", "pablock", "papass"):
         return route_ink("playaction", None)
     if route.kind in BLOCK_KINDS:
         return route_ink("bloqueio", None)
@@ -1118,6 +1184,20 @@ def formation_detail(side: str, base_key: str, set_key: str) -> str:
         (side, base_key, set_key),
     ).fetchone()
     return "" if row is None else str(row["detail"])
+
+
+def formation_label(base: str | None, style: str | None) -> str:
+    """Nome da base e do set, como a janela mostra. Sem set, fica só a base."""
+    if not base:
+        return ""
+    bases, sets = formation_menu("offense")
+    base_name = dict((key, label) for label, key in bases).get(str(base))
+    if not base_name:
+        return ""
+    set_name = dict((key, label) for label, key in sets.get(str(base), ())).get(str(style or ""))
+    if not set_name:
+        return base_name
+    return f"{base_name} · {set_name}"
 
 
 def formation_title(side: str, base_key: str, set_key: str) -> str:
@@ -1647,6 +1727,8 @@ def route_preset(name: str, cx: float, cy: float, strong: int = 1, screen_yards:
         points = [at(0, 0), at(1.2, 2.2), [cx + 6 * outside * YARD, cy - 4 * YARD]]
     elif name == "pablock":
         points = [at(0, 0), at(1.2, 2.2), at(1.2, 3.6)]
+    elif name == "papass":
+        points = [at(0, 0), at(1.2, 2.2)]
     elif name == "playaction":
         points = [at(0, 0), at(1, 3), [cx + 5 * outside * YARD, cy - YARD]]
     elif name == "rbrun":
@@ -1682,7 +1764,7 @@ def line_release(cx: float, cy: float) -> tuple[float, int]:
 
 
 def wheel_points(cx: float, cy: float) -> list[list[float]]:
-    """Flat em direção à lateral, parando antes da linha, e um balão que sobe na go."""
+    """Flat em direção à lateral e um balão que sobe na go, parando antes da linha de 10."""
     outside = -1 if cx <= FIELD_W / 2 else 1
     edge = 6 * YARD if outside < 0 else FIELD_W - 6 * YARD
     rail = edge
@@ -1716,7 +1798,7 @@ def wheel_points(cx: float, cy: float) -> list[list[float]]:
             sum(weight * anchor[0] for weight, anchor in zip(weights, controls)),
             sum(weight * anchor[1] for weight, anchor in zip(weights, controls)),
         ])
-    go_y = max(FIELD_TOP + 10, cy - 15 * YARD)
+    go_y = LOS_Y - 9 * YARD
     if go_y < points[-1][1] - 4:
         points.append([points[-1][0], go_y])
     return points
@@ -1757,7 +1839,7 @@ def route_for_player(name: str, label: str, cx: float, cy: float, strong: int = 
 
 def route_ending(kind: str, ending: str | None = None) -> str:
     """A seta é da rota. O motion fica na linha ondulada, sem ponta."""
-    if kind == "motion":
+    if kind in ("motion", "papass"):
         return "open"
     if ending in ("arrow", "bar", "ring", "open"):
         return ending
@@ -1901,19 +1983,84 @@ def route_from_raw(raw: dict) -> Route:
     )
 
 
+def _sheet_font(size: int, bold: bool = False):
+    from PIL import ImageFont
+
+    filename = "segoeuib.ttf" if bold else "segoeui.ttf"
+    try:
+        return ImageFont.truetype(filename, size)
+    except OSError:
+        return ImageFont.load_default()
+
+
+def _sheet_card(card) -> tuple:
+    """Imagem da jogada, nome, observação e formação. Uma imagem sozinha continua válida."""
+    if isinstance(card, tuple) and len(card) >= 3:
+        image, title, notes = card[0], card[1], card[2]
+        formation = card[3] if len(card) > 3 else ""
+        return image, str(title or ""), str(notes or ""), str(formation or "")
+    return card, "", "", ""
+
+
+def _fit_line(draw, text: str, font, width: float) -> str:
+    text = " ".join(text.split())
+    if not text or draw.textlength(text, font=font) <= width:
+        return text
+    ellipsis = "…"
+    while text and draw.textlength(text + ellipsis, font=font) > width:
+        text = text[:-1]
+    return text.rstrip() + ellipsis
+
+
+def _wrap_lines(draw, text: str, font, width: float, limit: int) -> list[str]:
+    words = " ".join(text.split())
+    if not words:
+        return []
+    lines: list[str] = []
+    current = ""
+    overflow = False
+    for word in words.split(" "):
+        trial = word if not current else f"{current} {word}"
+        if draw.textlength(trial, font=font) <= width:
+            current = trial
+            continue
+        if current:
+            lines.append(current)
+        current = word
+        if len(lines) >= limit:
+            overflow = True
+            break
+    if len(lines) >= limit:
+        overflow = True
+    elif current:
+        lines.append(current)
+    if not lines:
+        return []
+    if overflow:
+        lines = lines[:limit]
+        lines[-1] = _fit_line(draw, lines[-1], font, width)
+    elif draw.textlength(lines[-1], font=font) > width:
+        lines[-1] = _fit_line(draw, lines[-1], font, width)
+    return lines
+
+
 def compose_sheets(cards: list) -> list:
-    """Monta folhas deitadas com quatro jogadas: duas colunas e duas linhas."""
-    from PIL import Image, ImageDraw, ImageFont
+    """Monta folhas deitadas com quatro jogadas: duas colunas e duas linhas.
+
+    O nome e a observação são desenhados na folha, no tamanho de leitura.
+    O campo entra embaixo, sem esse texto já impresso na imagem.
+    """
+    from PIL import Image, ImageDraw
 
     per_page = SHEET_COLUMNS * SHEET_ROWS
     if not cards:
         return []
     cell_w = (SHEET_W - 2 * SHEET_MARGIN_X - (SHEET_COLUMNS - 1) * SHEET_GAP) // SHEET_COLUMNS
     cell_h = (SHEET_H - SHEET_MARGIN_TOP - SHEET_MARGIN_BOTTOM - (SHEET_ROWS - 1) * SHEET_GAP) // SHEET_ROWS
-    try:
-        font = ImageFont.truetype("segoeui.ttf", 15)
-    except OSError:
-        font = ImageFont.load_default()
+    title_font = _sheet_font(36, bold=True)
+    formation_font = _sheet_font(28, bold=True)
+    note_font = _sheet_font(26)
+    page_font = _sheet_font(18)
     pages = []
     total = math.ceil(len(cards) / per_page)
     for page_index in range(total):
@@ -1928,15 +2075,37 @@ def compose_sheets(cards: list) -> list:
             draw.rectangle((x0, y0, x0 + cell_w - 1, y0 + cell_h - 1), outline="#d6d3d1", width=2)
             if slot >= len(chunk):
                 continue
-            card = chunk[slot].convert("RGB")
-            inset = 8
-            scale = min((cell_w - 2 * inset) / card.width, (cell_h - 2 * inset) / card.height)
+            image, title, notes, formation = _sheet_card(chunk[slot])
+            pad = 16
+            text_w = cell_w - 2 * pad
+            y = y0 + 12
+            if title:
+                draw.text((x0 + pad, y), _fit_line(draw, title, title_font, text_w), fill="#111111", font=title_font)
+                y += 42
+            if formation:
+                draw.text(
+                    (x0 + pad, y),
+                    _fit_line(draw, formation, formation_font, text_w),
+                    fill="#1c1917",
+                    font=formation_font,
+                )
+                y += 34
+            note_lines = _wrap_lines(draw, notes, note_font, text_w, 3)
+            for line in note_lines:
+                draw.text((x0 + pad, y), line, fill="#1c1917", font=note_font)
+                y += 32
+            if title or formation or note_lines:
+                y += 8
+            card = image.convert("RGB")
+            area_w = cell_w - 2 * pad
+            area_h = max(40, y0 + cell_h - 12 - y)
+            scale = min(area_w / card.width, area_h / card.height)
             resized = card.resize(
                 (max(1, int(card.width * scale)), max(1, int(card.height * scale))),
                 Image.Resampling.LANCZOS,
             )
-            page.paste(resized, (x0 + (cell_w - resized.width) // 2, y0 + (cell_h - resized.height) // 2))
-        draw.text((SHEET_W / 2, SHEET_H - 16), f"{page_index + 1} / {total}", fill="#78716c", font=font, anchor="mm")
+            page.paste(resized, (x0 + (cell_w - resized.width) // 2, y + max(0, (area_h - resized.height) // 2)))
+        draw.text((SHEET_W / 2, SHEET_H - 18), f"{page_index + 1} / {total}", fill="#57534e", font=page_font, anchor="mm")
         pages.append(page)
     return pages
 
