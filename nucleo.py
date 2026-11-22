@@ -487,8 +487,12 @@ OL_SIZE = 22
 SKILL_SIZE = 22
 DEF_SIZE = 18
 OL_GAP = 28
+# O desenho encolhe em torno do centro. O lugar de cada jogador não muda.
+MARK_SCALE = 0.68
+LEAN_STEP = 15
+FIELD_ALPHA = 148
 
-SHAPE_TOOLS = ("circle", "square", "triangle", "rectangle", "x")
+SHAPE_TOOLS = ("circle", "square", "triangle", "rectangle")
 ROUTE_TOOLS = ("passe", "bloqueio", "playaction", "motion")
 
 
@@ -523,24 +527,36 @@ SHAPE_LABEL = {
 }
 
 ROUTE_COLOR = {
-    "passe": "#ea580c",
-    "bloqueio": "#ca8a04",
-    "blockrun": "#ca8a04",
-    "blockpass": "#ca8a04",
-    "playaction": "#7c3aed",
-    "paroute": "#7c3aed",
-    "pablock": "#7c3aed",
-    "papass": "#7c3aed",
-    "motion": "#1e3a8a",
-    "dropback": "#38bdf8",
-    "rbrun": "#ea580c",
+    "passe": "#fde047",
+    "bloqueio": "#a1a1aa",
+    "blockrun": "#a1a1aa",
+    "blockpass": "#a1a1aa",
+    "playaction": "#c4b5fd",
+    "paroute": "#c4b5fd",
+    "pablock": "#c4b5fd",
+    "papass": "#c4b5fd",
+    "motion": "#bef264",
+    "dropback": "#fb923c",
+    "rbrun": "#ef4444",
+    "release": "#60a5fa",
+    "blitz": "#ef4444",
 }
-ROUTE_INK = {"laranja": "#ea580c", "verde": "#15803d"}
-ZONE_ALPHA = 88
+# Laranja e verde continuam gravados nas jogadas. Na tela viram amarelo e vermelho.
+ROUTE_INK = {"laranja": "#fde047", "verde": "#ef4444"}
+FIELD_FILL = "#000000"
+FIELD_LINE = "#9ca3af"
+FIELD_TEXT = "#e5e5e5"
+MARK_FILL = "#ffffff"
+MARK_SELECT = "#fde047"
+TOOL_OUTLINE = "#e879f9"
+OL_CIRCLES = {"LT", "LG", "RG", "RT"}
+SKILL_CROSSES = {"X", "Y", "Z", "F", "A", "H", "FB", "U"}
+ZONE_ALPHA = 64
+BLITZ_ALPHA = 150
 ZONE_TONES = {
     "amarelo": ((234, 179, 8), "Amarelo", "#eab308", "#1c1917"),
     "azul": ((30, 58, 138), "Azul escuro", "#1e3a8a", "white"),
-    "celeste": ((56, 189, 248), "Azul claro", "#38bdf8", "#0f172a"),
+    "celeste": ((45, 212, 191), "Verde água", "#2dd4bf", "#042f2e"),
     "roxo": ((88, 28, 135), "Roxo escuro", "#581c87", "white"),
 }
 HASH_X = (70 + 9 / 12) / 160 * FIELD_W
@@ -560,7 +576,7 @@ RELEASE_HOLD = 1.0
 RUN_HOLD = 0.6
 
 BLOCK_KINDS = {"bloqueio", "blockrun", "blockpass"}
-# Jarda que o quarterback recua, a partir de onde está. A ponta nunca passa de 5 jardas atrás da linha.
+# As chaves identificam a base. A flecha do dropback é sempre 4 jardas para trás.
 DROP_TRAVEL = {
     "shotgun": 0.5,
     "pistol": 1.6,
@@ -596,7 +612,7 @@ MIRROR_TEXT = {
 }
 
 HINTS = {
-    "select": "Arraste a peça ou a rota. A rota que sai do jogador vai junto. As setas movem o jogador clicado. Com a rota selecionada, elas inclinam o traço em 45°. Puxe os cantos para redimensionar. Duplo clique escreve dentro. Delete remove.",
+    "select": "Arraste a peça ou a rota. A rota que sai do jogador vai junto. As setas movem o jogador clicado. Com a rota selecionada, esquerda e direita giram 15° por clique, sem limite. Puxe os cantos para redimensionar. Delete remove.",
     "circle": "Clique no campo para colocar um círculo. O texto fica dentro da peça.",
     "square": "Clique no campo para colocar um quadrado. O texto fica dentro da peça.",
     "triangle": "Clique no campo para colocar um triângulo. O texto fica dentro da peça.",
@@ -606,11 +622,11 @@ HINTS = {
     "bloqueio": "Clique os pontos do bloqueio. A ponta ganha uma trave. Enter, botão direito ou Concluir fecha.",
     "playaction": "Tracejado livre do play action. PA pass deixa a rota da árvore sair quando o fake acaba.",
     "motion": "Desenhe o motion, antes do snap. Depois selecione o jogador e escolha a rota: ela começa no fim.",
-    "blockpath": "Clique o jogador: a linha nasce nele. Cada clique esquerdo continua o traço. Botão direito conclui.",
-    "zone:amarelo": "Clique no campo para marcar uma área amarela. Ela fica atrás de tudo, translúcida.",
-    "zone:azul": "Clique no campo para marcar uma área azul escura. Ela fica atrás de tudo, translúcida.",
-    "zone:celeste": "Clique no campo para marcar uma área azul clara. Ela fica atrás de tudo, translúcida.",
-    "zone:roxo": "Clique no campo para marcar uma área roxa. Ela fica atrás de tudo, translúcida.",
+    "blockpath": "O jogador já está escolhido. Cada clique esquerdo continua o traço. Botão direito conclui.",
+    "zone:amarelo": "Clique o jogador da defesa e depois a cobertura amarela.",
+    "zone:azul": "Clique o jogador da defesa e depois a cobertura azul escura.",
+    "zone:celeste": "Clique o jogador da defesa e depois a cobertura verde-água.",
+    "zone:roxo": "Clique o jogador da defesa e depois a cobertura roxo escuro.",
 }
 
 
@@ -682,14 +698,23 @@ def straighten_axis(points: list, tolerance: float = 1.25) -> list:
     return output
 
 
+def painted_box(x: float, y: float, w: float, h: float, kind: str = "") -> tuple[float, float, float, float]:
+    """Caixa desenhada. A zona cobre a área inteira. O jogador fica menor, no mesmo centro."""
+    if kind == "zone":
+        return x, y, w, h
+    cx, cy = x + w / 2, y + h / 2
+    pw, ph = w * MARK_SCALE, h * MARK_SCALE
+    return cx - pw / 2, cy - ph / 2, pw, ph
+
+
 def lean_angle(points: list, lean: int) -> float:
-    """Giro da rota, em radianos. A direita leva o primeiro passo para o lado direito do campo."""
-    if lean not in (-1, 1) or len(points) < 2:
+    """Giro da rota, em radianos. Cada passo são 15°, sem limite."""
+    if lean == 0 or len(points) < 2:
         return 0.0
     dx = points[1][0] - points[0][0]
     dy = points[1][1] - points[0][1]
     toward_right = -1.0 if dy > abs(dx) else 1.0
-    return math.radians(45) * lean * toward_right
+    return math.radians(LEAN_STEP * lean) * toward_right
 
 
 def rotate_points(points: list, angle: float) -> list:
@@ -727,7 +752,7 @@ def follow_shift(route, routes) -> tuple[float, float]:
 def route_path(route, routes=None) -> list:
     points = route.points
     lean = getattr(route, "lean", 0) or 0
-    if lean in (-1, 1) and len(points) >= 2:
+    if lean and len(points) >= 2:
         points = rotate_points(points, lean_angle(points, lean))
     dx, dy = follow_shift(route, routes)
     if dx or dy:
@@ -736,12 +761,10 @@ def route_path(route, routes=None) -> list:
 
 
 def step_lean(current: int, toward: int) -> int:
-    """Um passo: esquerda, meio, direita. Para na extremidade."""
-    if current not in (-1, 0, 1):
-        current = 0
+    """Um passo de 15° para o lado pedido. Não para."""
     if toward not in (-1, 1):
         return current
-    return max(-1, min(1, current + toward))
+    return current + toward
 
 
 def route_length(points: list) -> float:
@@ -760,6 +783,8 @@ def yards_per_sec(kind: str) -> float:
         return PASS_BLOCK_YARDS_PER_SEC
     if kind == "dropback":
         return DROP_YARDS_PER_SEC
+    if kind == "blitz":
+        return RUN_BLOCK_YARDS_PER_SEC
     return PLAY_YARDS_PER_SEC
 
 
@@ -878,8 +903,8 @@ def alvo_seconds(elapsed: float, routes: list) -> float | None:
 def alvo_label(elapsed: float, routes: list) -> str:
     value = alvo_seconds(elapsed, routes)
     if value is None:
-        return "laranja —"
-    return f"laranja {value:.1f} s"
+        return "amarelo —"
+    return f"amarelo {value:.1f} s"
 
 
 def dot_position(route, traveled: float, snap: float, continued: set[str], routes=None) -> tuple[float, float] | None:
@@ -946,6 +971,43 @@ def dot_position(route, traveled: float, snap: float, continued: set[str], route
     return point_along(points, along * yards_per_sec(route.kind) / PLAY_YARDS_PER_SEC)
 
 
+def coverage_dots(shapes: list, traveled: float, snap: float) -> list[tuple[float, float, str]]:
+    """Bolinha da cobertura: sai do defensor e chega no meio da área."""
+    along = 0.0 if traveled < snap else traveled - snap
+    found = {shape.id: shape for shape in shapes}
+    dots: list[tuple[float, float, str]] = []
+    for zone in shapes:
+        if zone.kind != "zone":
+            continue
+        player = found.get(getattr(zone, "link", "") or "")
+        if player is None:
+            continue
+        start = [player.x + player.w / 2, player.y + player.h / 2]
+        end = [zone.x + zone.w / 2, zone.y + zone.h / 2]
+        x, y = point_along([start, end], along)
+        color = ZONE_TONES.get(zone.tone, ZONE_TONES["amarelo"])[2]
+        dots.append((x, y, color))
+    return dots
+
+
+def coverage_clock(shapes: list) -> float:
+    """Tempo de campo até a bolinha da cobertura mais longa chegar no meio."""
+    found = {shape.id: shape for shape in shapes}
+    longest = 0.0
+    for zone in shapes:
+        if zone.kind != "zone":
+            continue
+        player = found.get(getattr(zone, "link", "") or "")
+        if player is None:
+            continue
+        length = math.hypot(
+            (zone.x + zone.w / 2) - (player.x + player.w / 2),
+            (zone.y + zone.h / 2) - (player.y + player.h / 2),
+        )
+        longest = max(longest, clock_for(length, PLAY_YARDS_PER_SEC))
+    return longest
+
+
 def point_along(points: list, distance: float) -> tuple[float, float]:
     if not points:
         return (0.0, 0.0)
@@ -966,10 +1028,39 @@ def point_along(points: list, distance: float) -> tuple[float, float]:
     return (float(points[-1][0]), float(points[-1][1]))
 
 
+def player_mark(side: str, kind: str, text: str, center_y: float | None = None) -> str:
+    """Símbolo no campo. O texto da peça continua gravado, só não é desenhado."""
+    if kind == "zone":
+        return "zone"
+    if side == "defesa" or kind == "x":
+        label = (text or "").strip()
+        if label in ("E", "T"):
+            return "square"
+        if label == "N" and center_y is not None and LOS_Y - 2.5 * YARD <= center_y <= LOS_Y:
+            return "square"
+        if label in ("W", "M", "S"):
+            return "circle"
+        return "cross"
+    label = text.strip()
+    if label == "C":
+        return "square"
+    if label == "QB" or label in OL_CIRCLES:
+        return "circle"
+    if label in SKILL_CROSSES:
+        return "cross"
+    if kind == "circle":
+        return "circle"
+    if kind == "triangle":
+        return "triangle"
+    return "square"
+
+
 def route_ink(kind: str, color: str | None) -> str:
-    if kind in ("passe", "release") or kind not in ROUTE_COLOR:
+    if kind in ("passe", "sit"):
         return ROUTE_INK.get(color or "laranja", ROUTE_INK["laranja"])
-    return ROUTE_COLOR[kind]
+    if kind in ROUTE_COLOR:
+        return ROUTE_COLOR[kind]
+    return ROUTE_INK.get(color or "laranja", ROUTE_INK["laranja"])
 
 
 def moving_ink(route) -> str:
@@ -977,7 +1068,9 @@ def moving_ink(route) -> str:
         return route_ink("playaction", None)
     if route.kind in BLOCK_KINDS:
         return route_ink("bloqueio", None)
-    if route.kind in ("passe", "release", "sit"):
+    if route.kind == "release":
+        return route_ink("release", None)
+    if route.kind in ("passe", "sit"):
         return route_ink("passe", route.color)
     return route_ink(route.kind, route.color)
 
@@ -1635,12 +1728,14 @@ def route_preset(name: str, cx: float, cy: float, strong: int = 1, screen_yards:
         points = [at(0, 0), at(0, 10), at(6, 10)]
     elif name == "post":
         points = [at(0, 0), at(0, 10), at(3.5, 14)]
+    elif name == "skinny":
+        points = [at(0, 0), at(0, 10), at(1, 11), [cx + 4 * outside * YARD, cy - 16 * YARD]]
     elif name == "corner":
         points = [at(0, 0), at(0, 10), [cx + 3.5 * outside * YARD, cy - 14 * YARD]]
     elif name == "go":
         points = [at(0, 0), at(0, 15)]
     elif name == "flat":
-        points = balloon_points(cx, cy, 2, 6, outside)
+        points = balloon_points(cx, cy, 2, 8, outside)
     elif name == "wheel":
         points = wheel_points(cx, cy)
     elif name == "drag":
@@ -1674,6 +1769,15 @@ def route_preset(name: str, cx: float, cy: float, strong: int = 1, screen_yards:
         points = [at(0, 0), at(0, 10), [cx + 5 * outside * YARD, cy - 10 * YARD]]
     elif name == "seam":
         points = [at(0, 0), at(0.7, 6), at(2.2, 15)]
+    elif name == "shoot":
+        goal_y = LOS_Y - 0.5 * YARD
+        rise = cy - goal_y
+        if rise < YARD:
+            rise = 3 * YARD
+        rise *= 2 / 3
+        points = [[cx, cy], [cx + rise * 2.2 * outside, cy - rise]]
+    elif name == "sluggo":
+        points = [at(0, 0), at(0, 2), at(4, 6), at(4, 15)]
     elif name == "fade":
         points = [
             at(0, 0),
@@ -1837,6 +1941,14 @@ def route_for_player(name: str, label: str, cx: float, cy: float, strong: int = 
     return points
 
 
+def blitz_points(cx: float, cy: float) -> list[list[float]]:
+    """Seta para baixo, parando na linha ofensiva."""
+    end_y = LOS_Y + 8
+    if end_y <= cy + 10:
+        end_y = cy + 14
+    return [[cx, cy], [cx, min(FIELD_BOTTOM - 10, end_y)]]
+
+
 def route_ending(kind: str, ending: str | None = None) -> str:
     """A seta é da rota. O motion fica na linha ondulada, sem ponta."""
     if kind in ("motion", "papass"):
@@ -1854,38 +1966,11 @@ def stored_tip(raw) -> str | None:
     return None
 
 
-def dropback_points(cx: float, cy: float, base: str | None, backs: list[tuple[float, float, float]]) -> list[list[float]]:
-    cap = LOS_Y + 8 + 5 * YARD
-    if base in DROP_TRAVEL:
-        travel = DROP_TRAVEL[base]
-    else:
-        depth = (cy - LOS_Y) / YARD
-        if depth >= 4.6:
-            travel = DROP_TRAVEL["shotgun"]
-        elif depth >= 3.4:
-            travel = DROP_TRAVEL["pistol"]
-        else:
-            travel = DROP_TRAVEL["singleback"]
-    tip = min(cy + travel * YARD, cap)
-    for bx, by, radius in backs:
-        if abs(bx - cx) > 22:
-            continue
-        front = by - radius
-        if front > cy + 4:
-            tip = min(tip, front - 8)
-    tip = min(tip, cap)
-    if tip >= cy + 18:
-        return [[cx, cy], [cx, min(FIELD_BOTTOM - 10, tip)]]
-    room_left = cx - 10
-    room_right = FIELD_W - 10 - cx
-    for bx, _by, radius in backs:
-        if bx < cx:
-            room_left = min(room_left, cx - bx - radius)
-        elif bx > cx:
-            room_right = min(room_right, bx - radius - cx)
-    sign = -1 if room_left >= room_right else 1
-    tip_x = min(FIELD_W - 10, max(10, cx + sign * 22))
-    return [[cx, cy], [tip_x, min(cy, cap)]]
+def dropback_points(cx: float, cy: float, base: str | None = None, backs: list | None = None) -> list[list[float]]:
+    """Flecha reta, sempre 4 jardas para trás de onde o quarterback está."""
+    del base, backs
+    tip = min(FIELD_BOTTOM - 10, cy + 4 * YARD)
+    return [[cx, cy], [cx, tip]]
 
 
 def wavy_line(points: list[tuple[float, float]], amplitude: float = 4.5) -> list[tuple[float, float]]:
@@ -1930,6 +2015,8 @@ class Shape:
     text: str = ""
     side: str = "ataque"
     tone: str = ""
+    link: str = ""
+    hollow: bool = False
 
 
 @dataclass
@@ -1955,6 +2042,8 @@ def shape_from_raw(raw: dict) -> Shape:
         text=str(raw.get("text", "")),
         side=str(raw.get("side", "ataque")),
         tone=str(raw.get("tone", "")),
+        link=str(raw.get("link", "") or ""),
+        hollow=bool(raw.get("hollow", False)),
     )
 
 
@@ -1968,8 +2057,6 @@ def route_from_raw(raw: dict) -> Route:
     try:
         lean = int(raw.get("lean", 0) or 0)
     except (TypeError, ValueError):
-        lean = 0
-    if lean not in (-1, 0, 1):
         lean = 0
     return Route(
         str(raw["id"]),

@@ -1,7 +1,7 @@
-"""Quadro tático de ataque para futebol americano.
+"""Playbooker: quadro de jogadas de futebol americano.
 
 Aplicativo desktop para desenhar jogadas: peças, texto e rotas.
-Abra o Quadro tatico.exe nesta pasta. As jogadas ficam em dados/quadro.db.
+Abra o Playbooker.exe nesta pasta. As jogadas ficam em dados/quadro.db.
 """
 
 from __future__ import annotations
@@ -19,6 +19,11 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from nucleo import *  # noqa: F403
 
 
+def _hex_rgb(color: str) -> tuple[int, int, int]:
+    color = color.lstrip("#")
+    return int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
+
+
 class QuadroTatico(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
@@ -26,7 +31,7 @@ class QuadroTatico(tk.Tk):
         if self._headless:
             self.withdraw()
         open_store()
-        self.title("Quadro tático — ataque")
+        self.title("Playbooker")
         self.geometry("1360x860")
         self.minsize(1200, 780)
         if self._headless:
@@ -41,6 +46,8 @@ class QuadroTatico(tk.Tk):
         self.draft_follow: str | None = None
         self.selection: tuple[str, str] | None = None
         self.tool = "select"
+        self._field_photo = None
+        self._field_key = None
         self.drag: dict | None = None
         self._before = None
         self._text_before = None
@@ -93,7 +100,6 @@ class QuadroTatico(tk.Tk):
         self.bind_all("<Return>", self.on_return)
         self.bind_all("<Control-s>", self.on_save_key)
         self.bind_all("<Control-z>", self.on_undo_key)
-        self.bind_all("<Control-y>", self.on_redo_key)
         self.bind_all("<Control-n>", self.on_new_key)
         for key in ("Left", "Right", "Up", "Down"):
             self.bind_all(f"<{key}>", self.on_arrow)
@@ -120,7 +126,7 @@ class QuadroTatico(tk.Tk):
         ).pack(side="left", padx=(12, 8), pady=10)
         tk.Label(
             header,
-            text="Quadro tático",
+            text="Playbooker",
             bg="#1c1917",
             fg="white",
             font=("Segoe UI", 14, "bold"),
@@ -135,10 +141,10 @@ class QuadroTatico(tk.Tk):
         self.name_entry.bind("<FocusOut>", self.on_name_focus_out)
         self._header_button(header, "Nova", self.new_play).pack(side="left", padx=(16, 4))
         self._header_button(header, "Salvar", self.save_play, primary=True).pack(side="left", padx=4)
-        self._header_button(header, "Desfazer", self.undo).pack(side="left", padx=4)
-        self._header_button(header, "Refazer", self.redo).pack(side="left", padx=4)
-        self._header_button(header, "Duplicar", self.duplicate_play).pack(side="right", padx=(4, 12))
-        self._header_button(header, "Imagem", self.export_image).pack(side="right", padx=4)
+        self._header_button(header, "Duplicar", self.duplicate_play).pack(side="left", padx=4)
+        self.play_button = self._header_button(header, "Play", self.toggle_play)
+        self.play_button.pack(side="left", padx=4)
+        self._header_button(header, "Imagem", self.export_image).pack(side="right", padx=(4, 12))
         self._header_button(header, "GIF", self.export_gif).pack(side="right", padx=4)
         self._header_button(header, "PDF", self.export_pdf).pack(side="right", padx=4)
 
@@ -149,8 +155,8 @@ class QuadroTatico(tk.Tk):
         book.pack(fill="both", expand=True)
         tab_play = tk.Frame(book, bg="#fafaf9")
         tab_more = tk.Frame(book, bg="#fafaf9")
-        book.add(tab_play, text="Jogada")
-        book.add(tab_more, text="Ajuste")
+        book.add(tab_play, text="Ataque")
+        book.add(tab_more, text="Adicional")
         tools = self._scroll_panel(tab_play)
         extra = self._scroll_panel(tab_more)
         self.bind_all("<MouseWheel>", self._wheel_tools)
@@ -164,36 +170,17 @@ class QuadroTatico(tk.Tk):
         offense_bases, offense_sets = formation_menu("offense")
         defense_bases, defense_sets = formation_menu("defense")
         self._formation_pair(tools, "Ataque", offense_bases, offense_sets, self.insert_formation, first=True)
-        self._formation_pair(tools, "Defesa", defense_bases, defense_sets, self.insert_defense)
         self.show_offense_formation()
+        self._side_button(tools, "Apagar rotas", self.clear_routes).pack(fill="x", pady=(4, 1))
+        self._side_button(tools, "Espelhar formação", self.mirror_play).pack(fill="x", pady=(4, 1))
         tk.Checkbutton(
             tools,
-            text="Defesa atrás das rotas",
-            variable=self.defense_back,
-            command=self.redraw,
+            text="Encaixar na grade",
+            variable=self.snap_var,
             bg="#fafaf9",
             activebackground="#fafaf9",
             font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(4, 0))
-        self._side_button(tools, "Apagar defesa", self.clear_defense).pack(fill="x", pady=(2, 1))
-        self._tool_button(tools, "select")
-        self._side_button(tools, "Espelhar formação", self.mirror_play).pack(fill="x", pady=(4, 1))
-
-        self._rule(tools)
-        self.play_button = tk.Button(
-            tools,
-            text="Play",
-            command=self.toggle_play,
-            bg="#111111",
-            fg="white",
-            activebackground="#292524",
-            activeforeground="white",
-            relief="flat",
-            font=("Segoe UI", 10, "bold"),
-            cursor="hand2",
-            pady=4,
-        )
-        self.play_button.pack(fill="x", pady=(4, 2))
+        ).pack(anchor="w", pady=(2, 0))
 
         self._rule(tools)
         tk.Label(tools, text="Rota do jogador", bg="#fafaf9", fg="#1c1917", font=("Segoe UI", 11, "bold")).pack(
@@ -201,15 +188,18 @@ class QuadroTatico(tk.Tk):
         )
         color_row = tk.Frame(tools, bg="#fafaf9")
         color_row.pack(fill="x", pady=(0, 4))
-        for key, label, bg in (("laranja", "Laranja", "#ea580c"), ("verde", "Verde", "#15803d")):
+        for key, label, bg, fg in (
+            ("laranja", "Amarelo", "#fde047", "#1c1917"),
+            ("verde", "Vermelho", "#ef4444", "white"),
+        ):
             button = tk.Button(
                 color_row,
                 text=label,
                 command=lambda name=key: self.set_route_color(name),
                 bg=bg,
-                fg="white",
+                fg=fg,
                 activebackground=bg,
-                activeforeground="white",
+                activeforeground=fg,
                 relief="flat",
                 bd=0,
                 font=("Segoe UI", 9, "bold"),
@@ -227,28 +217,26 @@ class QuadroTatico(tk.Tk):
         specials.grid(row=0, column=0, sticky="nsew")
         tk.Frame(split, bg="#111111", width=2).grid(row=0, column=1, sticky="ns", padx=5)
         normals.grid(row=0, column=2, sticky="nsew")
-        for frame in (specials, normals):
-            frame.columnconfigure(0, weight=1)
-            frame.columnconfigure(1, weight=1)
+        specials.columnconfigure(0, weight=1)
+        normals.columnconfigure(0, weight=1)
+        normals.columnconfigure(1, weight=1)
         special_actions = (
+            ("Dropback", "dropback"),
             ("Motion", "motion"),
-            ("Release", "release"),
-            ("PA route", "paroute"),
-            ("PA block", "pablock"),
-            ("PA pass", "papass"),
-            ("Block run", "blockrun"),
-            ("Block pass", "blockpass"),
-            ("Run path", "runpath"),
-            ("Pass path", "passpath"),
+            ("Custom motion", "drawmotion"),
+            ("PA", "papass"),
+            ("Custom PA", "drawpa"),
             ("OL run", "olrun"),
             ("OL pass", "olpass"),
-            ("Dropback", "dropback"),
-            ("RB run", "rbrun"),
-            ("RB path", "rbpath"),
+            ("Block run", "blockrun"),
+            ("Block pass", "blockpass"),
+            ("Custom run", "drawrun"),
+            ("Custom block", "drawblock"),
+            ("Custom pass", "drawpass"),
         )
         for index, (label, kind) in enumerate(special_actions):
             self._side_button(specials, label, lambda kind=kind: self._player_action(kind), compact=True).grid(
-                row=index // 2, column=index % 2, sticky="ew", padx=1, pady=1
+                row=index, column=0, sticky="ew", padx=1, pady=1
             )
         presets = (
             ("Chair", "chair"),
@@ -266,10 +254,14 @@ class QuadroTatico(tk.Tk):
             ("In", "in"),
             ("Out", "out"),
             ("Post", "post"),
+            ("Release", "release"),
             ("Screen", "screen"),
             ("Seam", "seam"),
+            ("Shoot", "shoot"),
             ("Sit", "sit"),
+            ("Skinny", "skinny"),
             ("Slant", "slant"),
+            ("Sluggo", "sluggo"),
             ("Stick", "stick"),
             ("Swing", "swing"),
             ("Texas", "texas"),
@@ -282,6 +274,20 @@ class QuadroTatico(tk.Tk):
             )
         self._side_button(tools, "Espelhar rota", self.mirror_route).pack(fill="x", pady=(6, 1))
 
+        tk.Label(extra, text="Defesa", bg="#fafaf9", fg="#1c1917", font=("Segoe UI", 11, "bold")).pack(
+            anchor="w", pady=(6, 2)
+        )
+        self._formation_pair(extra, "Defesa", defense_bases, defense_sets, self.insert_defense)
+        tk.Checkbutton(
+            extra,
+            text="Defesa atrás das rotas",
+            variable=self.defense_back,
+            command=self.redraw,
+            bg="#fafaf9",
+            activebackground="#fafaf9",
+            font=("Segoe UI", 9),
+        ).pack(anchor="w", pady=(4, 0))
+        self._side_button(extra, "Apagar defesa", self.clear_defense).pack(fill="x", pady=(2, 1))
         self._rule(extra)
         tk.Label(extra, text="Cobertura", bg="#fafaf9", fg="#1c1917", font=("Segoe UI", 11, "bold")).pack(
             anchor="w", pady=(6, 2)
@@ -295,7 +301,7 @@ class QuadroTatico(tk.Tk):
             button = tk.Button(
                 zone_grid,
                 text=label,
-                command=lambda name=tone: self.set_tool(f"zone:{name}"),
+                command=lambda name=tone: self.assign_coverage(name),
                 bg=bg,
                 fg=fg,
                 activebackground=bg,
@@ -307,116 +313,19 @@ class QuadroTatico(tk.Tk):
             )
             button.grid(row=index // 2, column=index % 2, sticky="ew", padx=1, pady=1)
             self.zone_buttons[tone] = button
+        self._side_button(extra, "DL blitz", self.blitz_line).pack(fill="x", pady=(8, 1))
+        self._side_button(extra, "Blitz", self.blitz_player).pack(fill="x", pady=(1, 1))
+        self._side_button(extra, "Custom blitz", self.blitz_one).pack(fill="x", pady=(1, 2))
 
         self._rule(extra)
-        tk.Label(extra, text="Ajuste", bg="#fafaf9", fg="#1c1917", font=("Segoe UI", 11, "bold")).pack(
+        tk.Label(extra, text="Ferramentas", bg="#fafaf9", fg="#1c1917", font=("Segoe UI", 11, "bold")).pack(
             anchor="w", pady=(0, 2)
         )
-        tk.Label(extra, text="Texto da peça", bg="#fafaf9", fg="#44403c", font=("Segoe UI", 9)).pack(anchor="w")
-        self.label_entry = tk.Entry(extra, textvariable=self.label_var, font=("Segoe UI", 12), relief="solid", bd=1)
-        self.label_entry.pack(fill="x", pady=(2, 6), ipady=3)
-        self.label_entry.bind("<FocusOut>", self.on_label_focus_out)
-        tk.Checkbutton(
-            extra,
-            text="Encaixar na grade",
-            variable=self.snap_var,
-            bg="#fafaf9",
-            activebackground="#fafaf9",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(0, 4))
         for tool in SHAPE_TOOLS:
             self._tool_button(extra, tool)
-        tk.Label(extra, text="Ponta da rota", bg="#fafaf9", fg="#1c1917", font=("Segoe UI", 11, "bold")).pack(
-            anchor="w", pady=(8, 2)
-        )
-        tip_row = tk.Frame(extra, bg="#fafaf9")
-        tip_row.pack(fill="x", pady=(0, 4))
-        for key, label in ((None, "Auto"), ("arrow", "Seta"), ("bar", "Trave"), ("ring", "Anel")):
-            button = tk.Button(
-                tip_row,
-                text=label,
-                command=lambda name=key: self.set_route_tip(name),
-                bg="white",
-                fg="#1c1917",
-                activebackground="#e7e5e4",
-                activeforeground="#1c1917",
-                relief="flat",
-                bd=0,
-                font=("Segoe UI", 8, "bold"),
-                cursor="hand2",
-            )
-            button.pack(side="left", expand=True, fill="x", padx=1)
-            self.tip_buttons[key] = button
-        self._paint_route_tip()
-        for tool in ROUTE_TOOLS:
-            self._tool_button(extra, tool)
-        route_actions = tk.Frame(extra, bg="#fafaf9")
-        route_actions.pack(fill="x", pady=(6, 0))
-        self.finish_button = tk.Button(
-            route_actions,
-            text="Concluir rota",
-            command=self.finish_route,
-            bg="white",
-            fg="#1c1917",
-            relief="flat",
-            state="disabled",
-            font=("Segoe UI", 9),
-            cursor="hand2",
-        )
-        self.finish_button.pack(side="left", expand=True, fill="x", padx=(0, 4))
-        self.cancel_button = tk.Button(
-            route_actions,
-            text="Cancelar",
-            command=self.cancel_draft,
-            bg="white",
-            fg="#1c1917",
-            relief="flat",
-            state="disabled",
-            font=("Segoe UI", 9),
-            cursor="hand2",
-        )
-        self.cancel_button.pack(side="left", expand=True, fill="x")
         self._side_button(extra, "Excluir seleção", self.delete_selected).pack(fill="x", pady=(8, 2))
-        self._rule(extra)
-        self.legend_label = tk.Label(
-            extra,
-            text=(
-                "Rotas: laranja ou verde. Laranja é a principal.\n"
-                "RB run: linha laranja da corrida, no ritmo do bloqueio. Puxe a ponta para o tamanho.\n"
-                "RB run e RB path esperam um instante antes da bolinha sair, para o RB chegar no bloqueio.\n"
-                "RB path desenha a corrida: o clique no jogador gruda a linha e o direito conclui.\n"
-                "Dropback: azul claro. O tamanho muda com a base\n"
-                "e para a no máximo 5 jardas atrás da linha.\n"
-                "Na shotgun, o quarterback já está fundo: o passo é para o lado.\n"
-                "Bloqueio, corrida e passe: trave dourada.\n"
-                "Run path e Pass path desenham o bloqueio: o clique no jogador gruda a linha.\n"
-                "Rota selecionada: setas inclinam qualquer traço 45° à esquerda ou à direita.\n"
-                "Release: dourado no bloqueio, espera, depois a rota.\n"
-                "Play action: roxo. Seta se sai para rota, trave se bloqueia.\n"
-                "PA pass: tracejado roxo. A rota da árvore sai quando ele acaba.\n"
-                "Motion: linha azul-escura ondulada.\n"
-                "Auto, seta, trave ou anel escolhem a ponta. Auto mantém a de cada tipo.\n\n"
-                "Selecione um atacante e use a rota pronta.\n"
-                "No Ajuste, o primeiro clique numa peça sai do centro dela.\n"
-                "Play percorre cada traço no ritmo da ação e mostra o tempo.\n"
-                "Laranja conta o tempo da rota principal, até esse jogador terminar.\n"
-                "Flat, wheel e texas de quem não é X, F, Z ou Y chegam na linha em 45°, por fora da OL.\n"
-                "Setas movem o jogador clicado e a rota que sai dele. Shift anda uma jarda.\n"
-                "Cobertura fica atrás, translúcida.\n"
-                "Defesa atrás das rotas deixa os marcadores translúcidos,\n"
-                "com o desenho da rota por cima. Apagar defesa tira os jogadores.\n"
-                "Espelhar inverte a jogada. Espelhar rota inverte só a rota clicada.\n"
-                "Ctrl+S salva · Ctrl+Z desfaz"
-            ),
-            bg="#fafaf9",
-            fg="#57534e",
-            justify="left",
-            wraplength=190,
-            font=("Segoe UI", 8),
-        )
-        self.legend_label.pack(anchor="w", fill="x")
 
-        self.canvas = tk.Canvas(self, bg="#d6d3d1", highlightthickness=0, takefocus=True)
+        self.canvas = tk.Canvas(self, bg="#3a3a3a", highlightthickness=0, takefocus=True)
         self.canvas.grid(row=1, column=1, sticky="nsew", padx=8, pady=8)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -603,9 +512,10 @@ class QuadroTatico(tk.Tk):
             activeforeground="white",
             relief="flat",
             bd=0,
-            padx=8,
+            padx=2,
             pady=0,
-            font=("Segoe UI", 13, "bold"),
+            font=("Segoe UI", 9, "bold"),
+            width=2,
             cursor="hand2",
         ).pack(side="right", padx=(4, 0))
         set_combo.pack(side="left", fill="x", expand=True)
@@ -694,20 +604,20 @@ class QuadroTatico(tk.Tk):
         if color not in ROUTE_INK:
             return
         route = self.selected_route()
-        if route is not None and route.kind in ("passe", "release", "sit"):
+        if route is not None and route.kind in ("passe", "sit"):
             before = self.snapshot()
             route.color = color
             self.route_color = color
             self.commit_undo(before)
             self._paint_route_color()
             self.redraw()
-            self.set_status("Rota em laranja." if color == "laranja" else "Rota em verde.")
+            self.set_status("Rota em amarelo." if color == "laranja" else "Rota em vermelho.")
             return
         self.route_color = color
         self._paint_route_color()
         if self.draft and self.tool == "passe":
             self.redraw()
-        self.set_status("Próxima rota em laranja." if color == "laranja" else "Próxima rota em verde.")
+        self.set_status("Próxima rota em amarelo." if color == "laranja" else "Próxima rota em vermelho.")
 
     def _sketching(self, tool: str | None = None) -> bool:
         name = self.tool if tool is None else tool
@@ -734,8 +644,12 @@ class QuadroTatico(tk.Tk):
         self.set_status(HINTS[tool])
 
     def sync_route_buttons(self) -> None:
-        self.finish_button.configure(state="normal" if len(self.draft) >= 2 else "disabled")
-        self.cancel_button.configure(state="normal" if self.draft else "disabled")
+        finish = getattr(self, "finish_button", None)
+        cancel = getattr(self, "cancel_button", None)
+        if finish is not None:
+            finish.configure(state="normal" if len(self.draft) >= 2 else "disabled")
+        if cancel is not None:
+            cancel.configure(state="normal" if self.draft else "disabled")
 
     def typing(self) -> bool:
         widget = self.focus_get()
@@ -773,6 +687,12 @@ class QuadroTatico(tk.Tk):
             return x, y
         if self.snap_var.get():
             x, y = self.snap(x), self.snap(y)
+            if self.draft:
+                origin = self.draft[-1]
+                if abs(x - origin[0]) <= YARD / 2 and abs(y - origin[1]) > YARD / 2:
+                    x = origin[0]
+                elif abs(y - origin[1]) <= YARD / 2 and abs(x - origin[0]) > YARD / 2:
+                    y = origin[1]
         return x, y
 
     def redraw(self) -> None:
@@ -787,17 +707,22 @@ class QuadroTatico(tk.Tk):
         under = self.defense_back.get()
         if under:
             for shape in self.shapes:
-                if shape.side == "defesa" and shape.kind != "zone":
+                if shape.side == "defesa" and shape.kind != "zone" and not shape.hollow:
                     self.draw_shape(shape, self.selection == ("shape", shape.id), faded=True)
+        self.draw_blitz_layer()
         for route in self.routes:
             selected = self.selection == ("route", route.id)
+            if route.kind == "blitz":
+                if selected:
+                    self.draw_route_handles(route_path(route, self.routes))
+                continue
             self.draw_route(route.kind, route_path(route, self.routes), selected, route.split, route.color, route.ending)
             if selected:
                 self.draw_route_handles(route_path(route, self.routes))
         for shape in self.shapes:
             if shape.kind == "zone":
                 continue
-            if under and shape.side == "defesa":
+            if under and shape.side == "defesa" and not shape.hollow:
                 continue
             self.draw_shape(shape, self.selection == ("shape", shape.id))
         if self.selection and self.selection[0] == "shape" and self.tool == "select":
@@ -809,52 +734,68 @@ class QuadroTatico(tk.Tk):
         self.sync_route_buttons()
 
     def draw_field(self) -> None:
-        x0, y0 = self.to_screen(0, FIELD_TOP)
-        x1, y1 = self.to_screen(FIELD_W, FIELD_BOTTOM)
-        self.canvas.create_rectangle(x0, y0, x1, y1, fill="white", outline="#111111", width=2)
-        for relative in range(FRONT_YARDS, -BACK_YARDS - 1, -1):
-            y = LOS_Y - relative * YARD
-            sx0, sy = self.to_screen(0, y)
-            sx1, _sy = self.to_screen(FIELD_W, y)
-            if relative == 0:
-                self.canvas.create_line(sx0, sy, sx1, sy, fill="#111111", width=3)
-                continue
-            if relative % 5 == 0:
-                width = 2 if relative % 10 == 0 else 1
-                self.canvas.create_line(sx0, sy, sx1, sy, fill="#111111", width=width)
-            else:
-                self._hash(y)
-            if relative in (10, 20, 30, 40):
-                label_y = y + 12 if relative == FRONT_YARDS else y
-                self.canvas.create_text(
-                    *self.to_screen(36, label_y),
-                    text=str(relative),
-                    fill="#111111",
-                    font=("Segoe UI", 11, "bold"),
-                )
-                self.canvas.create_text(
-                    *self.to_screen(FIELD_W - 36, label_y),
-                    text=str(relative),
-                    fill="#111111",
-                    font=("Segoe UI", 11, "bold"),
-                )
-        ball = self.to_screen(FIELD_W / 2, LOS_Y)
-        self.canvas.create_oval(ball[0] - 8, ball[1] - 5, ball[0] + 8, ball[1] + 5, fill="#111111", outline="#111111")
-        self.canvas.create_text(
-            *self.to_screen(58, LOS_Y - 16),
-            text="LOS",
-            fill="#111111",
-            font=("Segoe UI", 9, "bold"),
-            anchor="w",
-        )
+        self._show_field_plate()
         formation = self.formation_caption()
         if formation:
             self.canvas.create_text(
                 *self.to_screen(FIELD_W / 2, FIELD_TOP + 22),
                 text=formation,
-                fill="#1c1917",
+                fill=FIELD_TEXT,
                 font=("Segoe UI", 13, "bold"),
             )
+
+    def _show_field_plate(self) -> None:
+        from PIL import ImageTk
+
+        key = round(self.scale, 3)
+        if self._field_photo is None or self._field_key != key:
+            self._field_photo = ImageTk.PhotoImage(self._field_plate(self.scale))
+            self._field_key = key
+        self.canvas.create_image(self.ox, self.oy, image=self._field_photo, anchor="nw")
+
+    def _field_plate(self, scale: float):
+        """Campo translúcido. As linhas ficam atrás dos jogadores e das rotas."""
+        from PIL import Image, ImageDraw, ImageFont
+
+        width = max(2, int(round(FIELD_W * scale)))
+        height = max(2, int(round(FIELD_H * scale)))
+        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        line = (*_hex_rgb(FIELD_LINE), 175)
+        text = (*_hex_rgb(FIELD_TEXT), 150)
+        draw.rectangle((0, 0, width - 1, height - 1), fill=(0, 0, 0, FIELD_ALPHA), outline=line, width=max(1, int(2 * scale)))
+
+        def at(x: float, y: float) -> tuple[float, float]:
+            return x * scale, (y - FIELD_TOP) * scale
+
+        try:
+            number_font = ImageFont.truetype("segoeuib.ttf", max(9, int(11 * scale)))
+            small_font = ImageFont.truetype("segoeuib.ttf", max(8, int(9 * scale)))
+        except OSError:
+            number_font = ImageFont.load_default()
+            small_font = number_font
+        for relative in range(FRONT_YARDS, -BACK_YARDS - 1, -1):
+            y = LOS_Y - relative * YARD
+            left, sy = at(0, y)
+            right, _sy = at(FIELD_W, y)
+            if relative == 0:
+                draw.line((left, sy, right, sy), fill=line, width=max(2, int(3 * scale)))
+            elif relative % 5 == 0:
+                draw.line((left, sy, right, sy), fill=line, width=max(1, int((2 if relative % 10 == 0 else 1) * scale)))
+            else:
+                for hx in (HASH_X, FIELD_W - HASH_X):
+                    hx0, hy0 = at(hx, y - 4)
+                    _hx, hy1 = at(hx, y + 4)
+                    draw.line((hx0, hy0, hx0, hy1), fill=line, width=max(1, int(2 * scale)))
+            if relative in (10, 20, 30, 40):
+                label_y = y + 12 if relative == FRONT_YARDS else y
+                draw.text(at(36, label_y), str(relative), fill=text, font=number_font, anchor="mm")
+                draw.text(at(FIELD_W - 36, label_y), str(relative), fill=text, font=number_font, anchor="mm")
+        ball = at(FIELD_W / 2, LOS_Y)
+        pad_x, pad_y = 8 * scale, 5 * scale
+        draw.ellipse((ball[0] - pad_x, ball[1] - pad_y, ball[0] + pad_x, ball[1] + pad_y), fill=line)
+        draw.text(at(58, LOS_Y - 16), "LOS", fill=text, font=small_font, anchor="lm")
+        return image
 
     def draw_zones(self) -> None:
         from PIL import Image, ImageDraw, ImageTk
@@ -862,6 +803,12 @@ class QuadroTatico(tk.Tk):
         for shape in self.shapes:
             if shape.kind != "zone":
                 continue
+            link = self._coverage_line(shape, self.shapes)
+            if link is not None:
+                color = ZONE_TONES.get(shape.tone, ZONE_TONES["amarelo"])[2]
+                ax, ay = self.to_screen(link[0], link[1])
+                bx, by = self.to_screen(link[2], link[3])
+                self.canvas.create_line(ax, ay, bx, by, fill=color, width=2, capstyle=tk.ROUND)
             x0, y0 = self.to_screen(shape.x, shape.y)
             x1, y1 = self.to_screen(shape.x + shape.w, shape.y + shape.h)
             left, top = int(min(x0, x1)), int(min(y0, y1))
@@ -876,78 +823,118 @@ class QuadroTatico(tk.Tk):
             self._zone_photos.append(photo)
             self.canvas.create_image(left, top, image=photo, anchor="nw")
 
-    def _hash(self, y: float) -> None:
-        left = HASH_X
-        right = FIELD_W - left
-        for hx in (left, right):
-            x, y0 = self.to_screen(hx, y - 4)
-            _x, y1 = self.to_screen(hx, y + 4)
-            self.canvas.create_line(x, y0, x, y1, fill="#111111", width=2)
+    def _geom(self, shape: Shape) -> tuple[float, float, float, float]:
+        return painted_box(shape.x, shape.y, shape.w, shape.h, shape.kind)
+
+    def _commit_box(self, shape: Shape, x: float, y: float, w: float, h: float) -> None:
+        if shape.kind == "zone":
+            shape.x, shape.y, shape.w, shape.h = x, y, w, h
+            return
+        cx, cy = x + w / 2, y + h / 2
+        stored_w, stored_h = w / MARK_SCALE, h / MARK_SCALE
+        shape.x, shape.y = cx - stored_w / 2, cy - stored_h / 2
+        shape.w, shape.h = stored_w, stored_h
 
     def draw_shape(self, shape: Shape, selected: bool, faded: bool = False) -> None:
-        x0, y0 = self.to_screen(shape.x, shape.y)
-        x1, y1 = self.to_screen(shape.x + shape.w, shape.y + shape.h)
+        x, y, w, h = self._geom(shape)
+        x0, y0 = self.to_screen(x, y)
+        x1, y1 = self.to_screen(x + w, y + h)
+        if shape.hollow:
+            self._draw_outline(shape, x0, y0, x1, y1, selected)
+            return
         if faded:
             self._draw_faded_player(shape, x0, y0, x1, y1, selected)
             return
-        outline = "#ea580c" if selected else "#111111"
+        mark = player_mark(shape.side, shape.kind, shape.text, shape.y + shape.h / 2)
+        defense = shape.side == "defesa" or shape.kind == "x"
+        fill = DEFENSE_FILL if defense else MARK_FILL
+        ink = MARK_SELECT if selected else fill
         width = 3 if selected else 2
-        if shape.kind == "x":
-            self.canvas.create_polygon(defense_triangle(x0, y0, x1, y1), fill=DEFENSE_FILL, outline=outline, width=width)
-            if shape.text:
-                self.canvas.create_text(
-                    (x0 + x1) / 2,
-                    (y0 * 2 + y1) / 3,
-                    text=shape.text,
-                    fill="#111111",
-                    font=self.font_for(shape),
-                )
+        if mark == "cross":
+            self._draw_cross(x0, y0, x1, y1, ink, width + 1)
             return
-        if shape.kind == "circle":
-            self.canvas.create_oval(x0, y0, x1, y1, fill="#111111", outline=outline, width=width)
-        elif shape.kind == "triangle":
+        if mark == "circle":
+            self.canvas.create_oval(x0, y0, x1, y1, fill=fill, outline=ink, width=width)
+            return
+        if mark == "triangle":
             points = (x0 + (x1 - x0) / 2, y0, x1, y1, x0, y1)
-            self.canvas.create_polygon(points, fill="#111111", outline=outline, width=width)
-        else:
-            self.canvas.create_rectangle(x0, y0, x1, y1, fill="#111111", outline=outline, width=width)
-        if shape.text:
-            if shape.kind == "triangle":
-                cy = y0 * 0.42 + y1 * 0.58
-            else:
-                cy = (y0 + y1) / 2
-            self.canvas.create_text(
-                (x0 + x1) / 2,
-                cy,
-                text=shape.text,
-                fill="white",
-                font=self.font_for(shape),
-            )
+            self.canvas.create_polygon(points, fill=fill, outline=ink, width=width)
+            return
+        self.canvas.create_rectangle(x0, y0, x1, y1, fill=fill, outline=ink, width=width)
+
+    def _draw_outline(self, shape: Shape, x0: float, y0: float, x1: float, y1: float, selected: bool) -> None:
+        color = MARK_SELECT if selected else TOOL_OUTLINE
+        width = 3 if selected else 2
+        if shape.kind == "circle":
+            self.canvas.create_oval(x0, y0, x1, y1, outline=color, width=width)
+            return
+        if shape.kind == "triangle":
+            self.canvas.create_polygon(x0 + (x1 - x0) / 2, y0, x1, y1, x0, y1, outline=color, fill="", width=width)
+            return
+        if shape.kind == "x":
+            self._draw_cross(x0, y0, x1, y1, color, width + 1)
+            return
+        self.canvas.create_rectangle(x0, y0, x1, y1, outline=color, width=width)
+
+    def _draw_cross(self, x0: float, y0: float, x1: float, y1: float, color: str, width: int) -> None:
+        span_x = (x1 - x0) * 0.16
+        span_y = (y1 - y0) * 0.16
+        ax, ay = x0 + span_x, y0 + span_y
+        bx, by = x1 - span_x, y1 - span_y
+        self.canvas.create_line(ax, ay, bx, by, fill=color, width=width, capstyle=tk.ROUND)
+        self.canvas.create_line(ax, by, bx, ay, fill=color, width=width, capstyle=tk.ROUND)
+
+    def _stamp_outline(self, draw, kind: str, ax: float, ay: float, bx: float, by: float, color: str, width: int) -> None:
+        if kind == "circle":
+            draw.ellipse((ax, ay, bx, by), outline=color, width=width)
+            return
+        if kind == "triangle":
+            draw.polygon([(ax + (bx - ax) / 2, ay), (bx, by), (ax, by)], fill=None, outline=color, width=width)
+            return
+        if kind == "x":
+            inset_x = (bx - ax) * 0.16
+            inset_y = (by - ay) * 0.16
+            draw.line((ax + inset_x, ay + inset_y, bx - inset_x, by - inset_y), fill=color, width=width)
+            draw.line((ax + inset_x, by - inset_y, bx - inset_x, ay + inset_y), fill=color, width=width)
+            return
+        draw.rectangle((ax, ay, bx, by), outline=color, width=width)
+
+    def _stamp_mark(self, draw, mark: str, ax: float, ay: float, bx: float, by: float, fill, outline, width: int) -> None:
+        if mark == "cross":
+            inset_x = (bx - ax) * 0.16
+            inset_y = (by - ay) * 0.16
+            draw.line((ax + inset_x, ay + inset_y, bx - inset_x, by - inset_y), fill=outline, width=width + 1)
+            draw.line((ax + inset_x, by - inset_y, bx - inset_x, ay + inset_y), fill=outline, width=width + 1)
+            return
+        if mark == "circle":
+            draw.ellipse((ax, ay, bx, by), fill=fill, outline=outline, width=width)
+            return
+        if mark == "triangle":
+            draw.polygon([(ax + (bx - ax) / 2, ay), (bx, by), (ax, by)], fill=fill, outline=outline)
+            return
+        draw.rectangle((ax, ay, bx, by), fill=fill, outline=outline, width=width)
 
     def _draw_faded_player(self, shape: Shape, x0: float, y0: float, x1: float, y1: float, selected: bool) -> None:
-        from PIL import Image, ImageDraw, ImageFont, ImageTk
+        from PIL import Image, ImageDraw, ImageTk
 
         pad = 4
         left, top = int(min(x0, x1)) - pad, int(min(y0, y1)) - pad
         right, bottom = int(max(x0, x1)) + pad, int(max(y0, y1)) + pad
         image = Image.new("RGBA", (max(2, right - left), max(2, bottom - top)), (0, 0, 0, 0))
         draw = ImageDraw.Draw(image)
-        points = defense_triangle(x0, y0, x1, y1)
-        polygon = [(points[index] - left, points[index + 1] - top) for index in range(0, 6, 2)]
-        outline = (234, 88, 12, 230) if selected else (17, 17, 17, 200)
-        draw.polygon(polygon, fill=(212, 212, 212, DEFENSE_ALPHA), outline=outline)
-        if shape.text:
-            _family, size, *_rest = self.font_for(shape)
-            try:
-                font = ImageFont.truetype("segoeuib.ttf", size)
-            except OSError:
-                font = ImageFont.load_default()
-            draw.text(
-                ((x0 + x1) / 2 - left, (y0 * 2 + y1) / 3 - top),
-                shape.text,
-                fill=(17, 17, 17, 220),
-                font=font,
-                anchor="mm",
-            )
+        mark = player_mark(shape.side, shape.kind, shape.text, shape.y + shape.h / 2)
+        outline = (253, 224, 71, 230) if selected else (212, 212, 212, 200)
+        self._stamp_mark(
+            draw,
+            mark,
+            x0 - left,
+            y0 - top,
+            x1 - left,
+            y1 - top,
+            (212, 212, 212, DEFENSE_ALPHA),
+            outline,
+            2,
+        )
         photo = ImageTk.PhotoImage(image)
         self._player_photos.append(photo)
         self.canvas.create_image(left, top, image=photo, anchor="nw")
@@ -959,6 +946,80 @@ class QuadroTatico(tk.Tk):
             size -= 1
         return ("Segoe UI", size, "bold")
 
+    def draw_blitz_layer(self) -> None:
+        """Blitz fica translúcida e atrás do ataque."""
+        from PIL import Image, ImageDraw, ImageTk
+
+        routes = [route for route in self.routes if route.kind == "blitz"]
+        drafting = self.tool == "blockpath" and self.block_kind == "blitz" and bool(self.draft)
+        if not routes and not drafting:
+            self._blitz_photo = None
+            return
+        width = max(2, self.canvas.winfo_width())
+        height = max(2, self.canvas.winfo_height())
+        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        for route in routes:
+            selected = self.selection == ("route", route.id)
+            screen = [self.to_screen(point[0], point[1]) for point in route_path(route, self.routes)]
+            self._paint_blitz_stroke(
+                draw,
+                screen,
+                route_ending(route.kind, route.ending),
+                210 if selected else BLITZ_ALPHA,
+                4 if selected else 3,
+                13,
+            )
+        if drafting:
+            points = [point[:] for point in self.draft]
+            if self.mouse is not None:
+                points.append([self.mouse[0], self.mouse[1]])
+            ink = (*_hex_rgb(ROUTE_COLOR["blitz"]), BLITZ_ALPHA)
+            for x, y in (self.to_screen(point[0], point[1]) for point in self.draft):
+                draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=ink)
+            if self.mouse is not None and len(points) >= 2:
+                rubber = [self.to_screen(point[0], point[1]) for point in points]
+                self._paint_blitz_stroke(draw, rubber, "open", BLITZ_ALPHA, 2, 13)
+        if self.playing:
+            traveled = self.play_elapsed * PLAY_YARDS_PER_SEC * YARD
+            snap = snap_distance(self.routes)
+            continued = {route.follow for route in self.routes if route.follow}
+            ink = (*_hex_rgb(ROUTE_COLOR["blitz"]), BLITZ_ALPHA)
+            for route in routes:
+                found = dot_position(route, traveled, snap, continued, self.routes)
+                if found is None:
+                    continue
+                sx, sy = self.to_screen(found[0], found[1])
+                draw.ellipse((sx - 7, sy - 7, sx + 7, sy + 7), fill=ink)
+        self._blitz_photo = ImageTk.PhotoImage(image)
+        self.canvas.create_image(0, 0, image=self._blitz_photo, anchor="nw")
+
+    def _paint_blitz_stroke(self, draw, screen, ending: str, alpha: int, width: int, arrow: float) -> None:
+        screen = straighten_axis(list(screen))
+        color = (*_hex_rgb(ROUTE_COLOR["blitz"]), alpha)
+        if len(screen) == 1:
+            x, y = screen[0]
+            draw.ellipse((x - 3, y - 3, x + 3, y + 3), fill=color)
+            return
+        if len(screen) < 2:
+            return
+        end = screen[-1]
+        prev = screen[-2]
+        vector = direction(prev, end)
+        line = list(screen)
+        if vector and ending == "arrow":
+            dist = math.hypot(end[0] - prev[0], end[1] - prev[1])
+            cut = min(arrow, dist * 0.45)
+            line[-1] = (end[0] - vector[0] * cut, end[1] - vector[1] * cut)
+        draw.line(line, fill=color, width=width, joint="curve")
+        if not vector or ending != "arrow":
+            return
+        ux, uy = vector
+        nx, ny = -uy, ux
+        left = (end[0] - ux * arrow + nx * arrow * 0.55, end[1] - uy * arrow + ny * arrow * 0.55)
+        right = (end[0] - ux * arrow - nx * arrow * 0.55, end[1] - uy * arrow - ny * arrow * 0.55)
+        draw.polygon([end, left, right], fill=color)
+
     def draw_route(
         self,
         kind: str,
@@ -969,8 +1030,8 @@ class QuadroTatico(tk.Tk):
         tip: str | None = None,
     ) -> None:
         if kind == "release" and isinstance(split, int) and 0 < split < len(points) - 1:
-            self._stroke(points[: split + 1], "bloqueio", selected, "open", color)
-            self._stroke(points[split:], "passe", selected, route_ending("passe", tip), color)
+            self._stroke(points[: split + 1], "release", selected, "open", None)
+            self._stroke(points[split:], "release", selected, route_ending("passe", tip), None)
             return
         if kind in ("paroute", "pablock") and isinstance(split, int) and 0 < split < len(points) - 1:
             self._stroke(points[: split + 1], "playaction", selected, "open", None)
@@ -1068,6 +1129,8 @@ class QuadroTatico(tk.Tk):
         if self.mouse is not None:
             points.append([self.mouse[0], self.mouse[1]])
         kind = self.block_kind if self.tool == "blockpath" and self.block_kind else self.tool
+        if kind == "blitz":
+            return
         color = route_ink(kind, self.route_color)
         screen = [self.to_screen(p[0], p[1]) for p in self.draft]
         for x, y in screen:
@@ -1075,14 +1138,17 @@ class QuadroTatico(tk.Tk):
         if self.mouse is None or len(points) < 2:
             return
         rubber = straighten_axis([self.to_screen(p[0], p[1]) for p in points])
-        if self.tool == "motion":
+        dash = (5, 4)
+        if kind == "motion":
             rubber = wavy_line(rubber, amplitude=4)
+            dash = None
         flat = [value for point in rubber for value in point]
-        self.canvas.create_line(*flat, fill=color, width=2, dash=(5, 4), capstyle=tk.ROUND, joinstyle=tk.ROUND)
+        self.canvas.create_line(*flat, fill=color, width=2, dash=dash, capstyle=tk.ROUND, joinstyle=tk.ROUND)
 
     def handle_positions(self, shape: Shape) -> dict[str, tuple[float, float]]:
-        x0, y0 = self.to_screen(shape.x, shape.y)
-        x1, y1 = self.to_screen(shape.x + shape.w, shape.y + shape.h)
+        x, y, w, h = self._geom(shape)
+        x0, y0 = self.to_screen(x, y)
+        x1, y1 = self.to_screen(x + w, y + h)
         return {"nw": (x0, y0), "ne": (x1, y0), "sw": (x0, y1), "se": (x1, y1)}
 
     def hit_handle(self, event) -> str | None:
@@ -1167,14 +1233,27 @@ class QuadroTatico(tk.Tk):
     def _note_lean(self, route: Route) -> None:
         if len(route.points) < 2:
             return
-        place = {-1: "inclinada à esquerda", 0: "no meio", 1: "inclinada à direita"}.get(route.lean, "no meio")
-        self.set_status(f"Rota {place}. Seta esquerda e seta direita mudam a inclinação em 45°.")
+        if route.lean == 0:
+            place = "para frente"
+        elif route.lean > 0:
+            place = f"{route.lean} à direita"
+        else:
+            place = f"{abs(route.lean)} à esquerda"
+        self.set_status(f"Rota {place}. Cada seta gira 15°, sem limite.")
 
     def _is_run_arrow(self, route: Route) -> bool:
         return route.kind == "rbrun" and len(route.points) == 2
 
     def _path_label(self) -> str:
-        return {"blockrun": "Block run", "blockpass": "Block pass", "rbrun": "RB run"}.get(self.block_kind or "", "Linha")
+        return {
+            "blockrun": "Custom block",
+            "blockpass": "Block pass",
+            "rbrun": "Custom run",
+            "passe": "Custom pass",
+            "motion": "Custom motion",
+            "papass": "Custom PA",
+            "blitz": "Custom blitz",
+        }.get(self.block_kind or "", "Linha")
 
     def _piece_center(self, x: float, y: float) -> tuple[float, float]:
         shape = self.hit_shape(x, y)
@@ -1198,14 +1277,15 @@ class QuadroTatico(tk.Tk):
     def reload_label(self) -> None:
         self._suspend = True
         shape = self.selected_shape()
-        self.label_var.set(shape.text if shape else "")
+        shown = "" if shape is None or shape.side == "defesa" or shape.kind == "x" else shape.text
+        self.label_var.set(shown)
         self._suspend = False
 
     def on_label_write(self, *_args) -> None:
         if self._suspend:
             return
         shape = self.selected_shape()
-        if not shape:
+        if not shape or shape.side == "defesa" or shape.kind == "x":
             return
         if self._text_before is None:
             self._text_before = self.snapshot()
@@ -1256,7 +1336,7 @@ class QuadroTatico(tk.Tk):
         now = time.monotonic()
         self.play_elapsed += now - self._play_last
         self._play_last = now
-        duration = play_distance(self.routes) / (PLAY_YARDS_PER_SEC * YARD)
+        duration = self.play_duration()
         if self.play_elapsed > duration + 0.45:
             self.play_elapsed = 0.0
         self.redraw()
@@ -1272,6 +1352,8 @@ class QuadroTatico(tk.Tk):
         snap = snap_distance(self.routes)
         continued = {route.follow for route in self.routes if route.follow}
         for route in self.routes:
+            if route.kind == "blitz":
+                continue
             found = dot_position(route, traveled, snap, continued, self.routes)
             if found is None:
                 continue
@@ -1280,24 +1362,29 @@ class QuadroTatico(tk.Tk):
                 continue
             sx, sy = self.to_screen(x, y)
             self.canvas.create_oval(sx - 7, sy - 7, sx + 7, sy + 7, fill=moving_ink(route), outline="#111111", width=2)
+        for x, y, color in coverage_dots(self.shapes, traveled, snap):
+            if any(self._hides_dot(shape, x, y) for shape in self.shapes):
+                continue
+            sx, sy = self.to_screen(x, y)
+            self.canvas.create_oval(sx - 7, sy - 7, sx + 7, sy + 7, fill=color, outline="#111111", width=2)
         self.canvas.create_text(
             *self.to_screen(FIELD_W - 28, FIELD_TOP + 36),
             text=f"{self.play_elapsed:.1f} s",
-            fill="#111111",
+            fill=FIELD_TEXT,
             font=("Segoe UI", 16, "bold"),
             anchor="e",
         )
         self.canvas.create_text(
             *self.to_screen(FIELD_W - 28, FIELD_TOP + 58),
             text=f"jogada {jogada_seconds(self.play_elapsed, self.routes):.1f} s",
-            fill="#111111",
+            fill=FIELD_TEXT,
             font=("Segoe UI", 12, "bold"),
             anchor="e",
         )
         self.canvas.create_text(
             *self.to_screen(FIELD_W - 28, FIELD_TOP + 78),
             text=alvo_label(self.play_elapsed, self.routes),
-            fill="#111111",
+            fill=FIELD_TEXT,
             font=("Segoe UI", 12, "bold"),
             anchor="e",
         )
@@ -1322,14 +1409,8 @@ class QuadroTatico(tk.Tk):
                 self._last_click_at = now
                 return
             if self.tool == "blockpath" and not self.draft:
-                shape = self.hit_shape(x, y)
-                if shape is None or shape.side == "defesa" or shape.kind in ("x", "zone"):
-                    self.set_status("Clique um jogador do ataque. O bloqueio nasce nele.")
-                    return
-                self.select("shape", shape.id)
-                self._anchor_block(shape)
-                self._last_click_at = now
-                self._last_click_pos = (event.x, event.y)
+                self.set_tool("select")
+                self.set_status("Clique o jogador do ataque e depois a opção.")
                 return
             if not self.draft and self.tool not in ("motion", "blockpath"):
                 lead = self._active_lead()
@@ -1358,15 +1439,11 @@ class QuadroTatico(tk.Tk):
             self.place_shape(self.tool, x, y)
             return
 
-        if self.tool.startswith("zone:"):
-            self.place_zone(self.tool.split(":", 1)[1], x, y)
-            return
-
         handle = self.hit_handle(event)
         if handle:
             shape = self.selected_shape()
             self._before = self.snapshot()
-            self.drag = {"mode": "resize", "handle": handle, "box": (shape.x, shape.y, shape.w, shape.h)}
+            self.drag = {"mode": "resize", "handle": handle, "box": self._geom(shape)}
             return
 
         route = self.selected_route()
@@ -1376,7 +1453,7 @@ class QuadroTatico(tk.Tk):
             if self._is_run_arrow(route) and index != 0 and (index == last or self.hit_route(x, y) is route):
                 self._before = self.snapshot()
                 self.drag = {"mode": "stretch", "angle": lean_angle(route.points, route.lean)}
-                self.set_status("Puxe a ponta para mudar o tamanho. As setas giram em 45°.")
+                self.set_status("Puxe a ponta para mudar o tamanho. As setas inclinam 15° por clique.")
                 return
             if index is not None:
                 self._before = self.snapshot()
@@ -1402,7 +1479,7 @@ class QuadroTatico(tk.Tk):
             self._before = self.snapshot()
             if self._is_run_arrow(found):
                 self.drag = {"mode": "stretch", "angle": lean_angle(found.points, found.lean)}
-                self.set_status("Puxe a ponta para mudar o tamanho. As setas giram em 45°.")
+                self.set_status("Puxe a ponta para mudar o tamanho. As setas inclinam 15° por clique.")
             else:
                 self.drag = {"mode": "move-route", "orig": copy.deepcopy(found.points), "mx": x, "my": y}
                 self._note_lean(found)
@@ -1484,18 +1561,18 @@ class QuadroTatico(tk.Tk):
         ax, ay, nx, ny = anchors[handle]
         left, right = sorted((ax, nx))
         top, bottom = sorted((ay, ny))
-        if right - left < MIN_SIZE:
+        floor = MIN_SIZE if shape.kind == "zone" else 8
+        if right - left < floor:
             if nx >= ax:
-                right = left + MIN_SIZE
+                right = left + floor
             else:
-                left = right - MIN_SIZE
-        if bottom - top < MIN_SIZE:
+                left = right - floor
+        if bottom - top < floor:
             if ny >= ay:
-                bottom = top + MIN_SIZE
+                bottom = top + floor
             else:
-                top = bottom - MIN_SIZE
-        shape.x, shape.y = left, top
-        shape.w, shape.h = right - left, bottom - top
+                top = bottom - floor
+        self._commit_box(shape, left, top, right - left, bottom - top)
 
     def on_up(self, _event) -> None:
         if self.drag and self._before is not None and self.snapshot() != self._before:
@@ -1545,8 +1622,6 @@ class QuadroTatico(tk.Tk):
         if not shape:
             return
         self.select("shape", shape.id)
-        self.label_entry.focus_set()
-        self.label_entry.selection_range(0, tk.END)
 
     def place_shape(self, kind: str, x: float, y: float) -> None:
         before = self.snapshot()
@@ -1569,30 +1644,47 @@ class QuadroTatico(tk.Tk):
             y - h / 2,
             w,
             h,
-            "",
+            "" if kind == "x" else self.label_var.get(),
             "defesa" if kind == "x" else "ataque",
+            hollow=True,
         )
         self.shapes.append(shape)
         self.selection = ("shape", shape.id)
         self.commit_undo(before)
         self.reload_label()
         self.set_tool("select")
-        self.set_status("Peça selecionada. Arraste para mover. Cada canto muda largura e altura por conta.")
+        self.set_status("Contorno colocado. Arraste para mover. Cada canto muda largura e altura por conta.")
 
-    def place_zone(self, tone: str, x: float, y: float) -> None:
+    def assign_coverage(self, tone: str) -> None:
+        shape = self.selected_shape()
+        if shape is not None and shape.side == "defesa" and shape.kind != "zone":
+            size = 8 * YARD
+            cx = shape.x + shape.w / 2
+            cy = shape.y + shape.h / 2
+            zx = min(FIELD_W - size / 2 - 8, max(size / 2 + 8, cx))
+            zy = min(FIELD_BOTTOM - size / 2 - 8, max(FIELD_TOP + size / 2 + 8, cy - 4 * YARD))
+            self.place_zone(tone, zx, zy, shape.id)
+            return
+        self.set_status("Clique o jogador da defesa e depois a cobertura.")
+
+    def place_zone(self, tone: str, x: float, y: float, link: str = "") -> None:
         if tone not in ZONE_TONES:
             return
         before = self.snapshot()
         size = 8 * YARD
-        if self.snap_var.get():
+        if self.snap_var.get() and not link:
             x, y = self.snap(x), self.snap(y)
-        shape = Shape(new_id(), "zone", x - size / 2, y - size / 2, size, size, "", "zona", tone)
+        shape = Shape(new_id(), "zone", x - size / 2, y - size / 2, size, size, "", "zona", tone, link)
         self.shapes.append(shape)
         self.selection = ("shape", shape.id)
         self.commit_undo(before)
         self.reload_label()
         self.set_tool("select")
-        self.set_status(f"Área {ZONE_TONES[tone][1].lower()} selecionada. Arraste, use as setas, ou puxe um canto.")
+        name = ZONE_TONES[tone][1].lower()
+        if link:
+            self.set_status(f"Cobertura {name} ligada ao jogador. Arraste o círculo para o lugar.")
+            return
+        self.set_status(f"Área {name} selecionada. Arraste, use as setas, ou puxe um canto.")
 
     def finish_route(self) -> None:
         if len(self.draft) < 2:
@@ -1600,9 +1692,13 @@ class QuadroTatico(tk.Tk):
             return
         before = self.snapshot()
         if self.tool == "blockpath":
-            kind = self.block_kind if self.block_kind in ("blockrun", "blockpass", "rbrun") else "blockrun"
+            kind = (
+                self.block_kind
+                if self.block_kind in ("blockrun", "blockpass", "rbrun", "passe", "motion", "papass", "blitz")
+                else "blockrun"
+            )
+            follow = self.draft_follow
             self._clear_anchor_routes()
-            follow = None
         else:
             kind = self.tool if self.tool in ROUTE_TOOLS else "passe"
             follow = self.draft_follow if kind not in ("motion", "papass") else None
@@ -1614,7 +1710,7 @@ class QuadroTatico(tk.Tk):
             [p[:] for p in self.draft],
             color=self.route_color if kind == "passe" else None,
             follow=follow,
-            ending=self.route_tip,
+            ending="arrow" if kind == "blitz" else self.route_tip,
         )
         self.routes.append(route)
         anchor = next((shape for shape in self.shapes if shape.id == self.block_anchor), None)
@@ -1627,42 +1723,74 @@ class QuadroTatico(tk.Tk):
         self.commit_undo(before)
         self.reload_label()
         self.set_tool("select")
-        if kind in ("blockrun", "blockpass", "rbrun"):
-            label = {"blockrun": "Block run", "blockpass": "Block pass", "rbrun": "RB run"}[kind]
+        if kind in ("blockrun", "blockpass", "rbrun", "passe", "motion", "papass", "blitz"):
+            label = {
+                "blockrun": "Custom block",
+                "blockpass": "Block pass",
+                "rbrun": "Custom run",
+                "passe": "Custom pass",
+                "motion": "Custom motion",
+                "papass": "Custom PA",
+                "blitz": "Custom blitz",
+            }[kind]
             who = anchor.text if anchor is not None and anchor.text else "o jogador"
             self.set_status(f"{label} de {who}. A linha sai dele.")
             return
         self.set_status("Rota selecionada. Arraste para mover ou puxe um ponto para ajustar.")
 
-    def begin_block_path(self, kind: str) -> None:
+    def begin_block_path(self, kind: str, defense: bool = False) -> None:
+        shape = self.selected_shape()
+        defender = shape is not None and shape.side == "defesa" and shape.kind != "zone"
+        attacker = shape is not None and shape.side != "defesa" and shape.kind not in ("x", "zone")
+        if defense and not defender:
+            self.set_status("Clique o jogador da defesa e depois Custom blitz.")
+            return
+        if not defense and not attacker:
+            self.set_status("Clique o jogador do ataque e depois a opção.")
+            return
         self.block_kind = kind
         self.block_anchor = None
         self.draft = []
         self.draft_follow = None
         self.mouse = None
         self.set_tool("blockpath")
-        shape = self.selected_shape()
-        if shape is not None and shape.side != "defesa" and shape.kind not in ("x", "zone"):
-            self._anchor_block(shape)
+        self._anchor_block(shape)
 
     def _anchor_block(self, shape: Shape) -> None:
         self.block_anchor = shape.id
-        self.draft = [[shape.x + shape.w / 2, shape.y + shape.h / 2]]
-        self.draft_follow = None
+        if self.block_kind in ("motion", "blitz"):
+            lead = None
+        elif self.block_kind == "papass":
+            lead = self._motion_from(shape)
+        else:
+            lead = self._papass_from(shape) or self._motion_from(shape)
+        if lead is not None and lead.points:
+            self.draft = [lead.points[-1][:]]
+            self.draft_follow = lead.id
+            tail = " Começa no fim do motion." if lead.kind == "motion" else " Começa no fim do play action."
+        else:
+            self.draft = [[shape.x + shape.w / 2, shape.y + shape.h / 2]]
+            self.draft_follow = None
+            tail = ""
         self.mouse = tuple(self.draft[0])
         self.sync_route_buttons()
         self.redraw()
         who = shape.text or "o jogador"
-        label = {"blockrun": "Block run", "blockpass": "Block pass", "rbrun": "RB run"}.get(self.block_kind, "Linha")
-        self.set_status(f"{label} de {who}. A linha está nele. Clique o percurso. Botão direito conclui.")
+        label = self._path_label()
+        self.set_status(f"{label} de {who}. A linha está nele.{tail} Clique o percurso. Botão direito conclui.")
 
     def _clear_anchor_routes(self) -> None:
         shape = next((item for item in self.shapes if item.id == self.block_anchor), None)
         if shape is None:
             return
+        keep = self.draft_follow
         removed: set[str] = set()
         for route in self.routes:
-            if self._starts_on(route, shape):
+            if keep and route.id == keep:
+                continue
+            if keep and route.follow == keep:
+                removed.update(self._chain_from(route.id))
+            elif self._starts_on(route, shape):
                 removed.update(self._chain_from(route.id))
         self.routes = [route for route in self.routes if route.id not in removed]
 
@@ -1673,29 +1801,127 @@ class QuadroTatico(tk.Tk):
         self.block_anchor = None
         self.redraw()
         if self.tool == "blockpath":
-            self.set_status(HINTS["blockpath"])
+            self.set_tool("select")
+            self.set_status("Desenho cancelado. Clique o jogador e depois a opção.")
             return
         self.set_status("Rota cancelada.")
 
-    def clear_defense(self) -> None:
-        if not any(shape.side == "defesa" for shape in self.shapes):
-            self.set_status("Não há jogadores de defesa.")
+    def clear_routes(self) -> None:
+        if not self.routes and not self.draft:
+            self.set_status("Não há rotas, bloqueios ou corridas.")
             return
         if not messagebox.askyesno(
-            "Defesa",
-            "Apagar todos os jogadores da defesa? A cobertura permanece.",
+            "Apagar rotas",
+            "Apagar rotas, bloqueios e corridas? A formação permanece.",
             parent=self,
         ):
             return
         before = self.snapshot()
-        self.shapes = [shape for shape in self.shapes if shape.side != "defesa"]
+        self.routes = []
+        self.draft = []
+        self.draft_follow = None
+        self.mouse = None
+        self.block_anchor = None
+        if self.selection and self.selection[0] == "route":
+            self.selection = None
+        if self.tool == "blockpath":
+            self.tool = "select"
+        self.commit_undo(before)
+        self.reload_label()
+        self.redraw()
+        self.set_status("Rotas, bloqueios e corridas apagados. A formação permanece.")
+
+    def blitz_line(self) -> None:
+        players = [shape for shape in self.shapes if self._is_rush_lineman(shape)]
+        if not players:
+            self.set_status("Não há tackles nem ends. Monte a defesa.")
+            return
+        self._give_blitz(players)
+        self.set_status(f"Blitz em {len(players)} da linha defensiva, seta vermelha para baixo.")
+
+    def blitz_player(self) -> None:
+        shape = self.selected_shape()
+        if shape is None or shape.side != "defesa" or shape.kind == "zone":
+            self.set_status("Clique o jogador da defesa e depois Blitz.")
+            return
+        self._give_blitz([shape])
+        who = shape.text or "o jogador"
+        self.set_status(f"Blitz de {who}, seta vermelha para baixo.")
+
+    def blitz_one(self) -> None:
+        self.begin_block_path("blitz", defense=True)
+
+    def _coverage_line(self, shape: Shape, shapes: list[Shape]) -> tuple[float, float, float, float] | None:
+        link = getattr(shape, "link", "") or ""
+        if not link:
+            return None
+        player = next((item for item in shapes if item.id == link), None)
+        if player is None:
+            return None
+        return (
+            player.x + player.w / 2,
+            player.y + player.h / 2,
+            shape.x + shape.w / 2,
+            shape.y + shape.h / 2,
+        )
+
+    def _is_rush_lineman(self, shape: Shape) -> bool:
+        if shape.side != "defesa" or shape.kind == "zone":
+            return False
+        if shape.text in ("E", "T"):
+            return True
+        if shape.text != "N":
+            return False
+        cy = shape.y + shape.h / 2
+        return LOS_Y - 2.5 * YARD <= cy <= LOS_Y
+
+    def _give_blitz(self, players: list[Shape]) -> None:
+        before = self.snapshot()
+        kept = []
+        for route in self.routes:
+            if route.kind == "blitz" and any(self._starts_on(route, shape) for shape in players):
+                continue
+            kept.append(route)
+        self.routes = kept
+        for shape in players:
+            cx = shape.x + shape.w / 2
+            cy = shape.y + shape.h / 2
+            self.routes.append(Route(new_id(), "blitz", blitz_points(cx, cy), ending="arrow"))
+        self.commit_undo(before)
+        self.redraw()
+
+    def clear_defense(self) -> None:
+        drawing = self.tool == "blockpath" and self.block_kind == "blitz"
+        has_defense = any(shape.side == "defesa" or shape.kind == "zone" for shape in self.shapes)
+        has_blitz = any(route.kind == "blitz" for route in self.routes)
+        if not has_defense and not has_blitz and not drawing:
+            self.set_status("Não há defesa, blitz nem cobertura.")
+            return
+        if not messagebox.askyesno(
+            "Defesa",
+            "Apagar a defesa, as blitz e as coberturas? O ataque permanece.",
+            parent=self,
+        ):
+            return
+        before = self.snapshot()
+        self.shapes = [shape for shape in self.shapes if shape.side != "defesa" and shape.kind != "zone"]
+        self.routes = [route for route in self.routes if route.kind != "blitz"]
+        if drawing:
+            self.draft = []
+            self.draft_follow = None
+            self.mouse = None
+            self.block_anchor = None
+            self.tool = "select"
         if self.selection and self.selection[0] == "shape":
             if not any(shape.id == self.selection[1] for shape in self.shapes):
+                self.selection = None
+        elif self.selection and self.selection[0] == "route":
+            if not any(route.id == self.selection[1] for route in self.routes):
                 self.selection = None
         self.commit_undo(before)
         self.reload_label()
         self.redraw()
-        self.set_status("Defesa apagada.")
+        self.set_status("Defesa, blitz e coberturas apagadas. O ataque permanece.")
 
     def _hides_dot(self, shape: Shape, x: float, y: float) -> bool:
         if shape.kind == "zone" or not self.shape_contains(shape, x, y):
@@ -1714,6 +1940,9 @@ class QuadroTatico(tk.Tk):
         kind, item_id = self.selection
         if kind == "shape":
             self.shapes = [shape for shape in self.shapes if shape.id != item_id]
+            for shape in self.shapes:
+                if getattr(shape, "link", "") == item_id:
+                    shape.link = ""
         else:
             removed = next((route for route in self.routes if route.id == item_id), None)
             gone = set(self._chain_from(item_id)) if removed and removed.kind in ("motion", "papass") else {item_id}
@@ -1781,7 +2010,11 @@ class QuadroTatico(tk.Tk):
             ):
                 return
         before = self.snapshot()
+        gone = {shape.id for shape in self.shapes if shape.side == "defesa"}
         self.shapes = [shape for shape in self.shapes if shape.side != "defesa"]
+        for shape in self.shapes:
+            if getattr(shape, "link", "") in gone:
+                shape.link = ""
         self.draft = []
         if self.selection and self.selection[0] == "shape":
             if not any(shape.id == self.selection[1] for shape in self.shapes):
@@ -1816,7 +2049,7 @@ class QuadroTatico(tk.Tk):
         for route in self.routes:
             for point in route.points:
                 point[0] = FIELD_W - point[0]
-            if route.lean in (-1, 1):
+            if route.lean:
                 route.lean = -route.lean
         for point in self.draft:
             point[0] = FIELD_W - point[0]
@@ -1834,7 +2067,7 @@ class QuadroTatico(tk.Tk):
         origin = route.points[0][0]
         for point in route.points:
             point[0] = origin * 2 - point[0]
-        if route.lean in (-1, 1):
+        if route.lean:
             route.lean = -route.lean
         if route.kind in ("motion", "papass"):
             for follower_id in self._chain_from(route.id):
@@ -1843,14 +2076,14 @@ class QuadroTatico(tk.Tk):
                 follower = next(item for item in self.routes if item.id == follower_id)
                 for point in follower.points:
                     point[0] = origin * 2 - point[0]
-                if follower.lean in (-1, 1):
+                if follower.lean:
                     follower.lean = -follower.lean
         self.commit_undo(before)
         self.redraw()
         self.set_status("Rota espelhada em torno do jogador.")
 
     def _starts_on(self, route: Route, shape: Shape) -> bool:
-        if not route.points or route.kind not in ("passe", "sit", "motion", "playaction", "paroute", "pablock", "papass", "dropback", "release", "rbrun", *BLOCK_KINDS):
+        if not route.points or route.kind not in ("passe", "sit", "motion", "playaction", "paroute", "pablock", "papass", "dropback", "release", "rbrun", "blitz", *BLOCK_KINDS):
             return False
         x, y = route.points[0]
         return shape.x - 8 <= x <= shape.x + shape.w + 8 and shape.y - 8 <= y <= shape.y + shape.h + 8
@@ -1963,7 +2196,7 @@ class QuadroTatico(tk.Tk):
             if lead is not None and lead.kind in ("motion", "papass") and lead.points:
                 shape = self._player_of(lead)
             if shape is None or shape.side == "defesa" or shape.kind == "x":
-                self.set_status("Selecione um jogador do ataque para lançar a rota.")
+                self.set_status("Clique o jogador do ataque e depois a opção.")
                 return
         before = self.snapshot()
         cx = shape.x + shape.w / 2
@@ -2030,6 +2263,9 @@ class QuadroTatico(tk.Tk):
             "release": "Release",
             "dropback": "Dropback",
             "rbrun": "RB run",
+            "shoot": "Shoot",
+            "sluggo": "Sluggo",
+            "skinny": "Skinny",
         }
         label = labels.get(name, name.capitalize())
         who = shape.text or "o jogador"
@@ -2040,7 +2276,7 @@ class QuadroTatico(tk.Tk):
         elif name == "pablock":
             self.set_status(f"Play action de {who}: o tracejado é o fake, a trave é o bloqueio.")
         elif name == "papass":
-            self.set_status(f"Play action de {who}. Agora escolha a rota da árvore: ela começa quando o play action acaba.")
+            self.set_status(f"Play action de {who}. Depois escolha a rota, o bloqueio ou o desenho livre.")
         elif papass is not None:
             self.set_status(f"{label} começa no fim do play action. Ela sai quando o play action acaba.")
         elif name == "chair":
@@ -2052,13 +2288,10 @@ class QuadroTatico(tk.Tk):
         elif name == "whip":
             self.set_status(f"Whip de {who}: cinco jardas, ameaça para dentro e sai reto para fora.")
         elif name == "rbrun":
-            self.set_status(f"Corrida de {who}, em laranja, no ritmo do bloqueio.")
+            self.set_status(f"Corrida de {who}, em vermelho, no ritmo do bloqueio.")
         elif name == "dropback":
             yards = abs(route.points[-1][1] - route.points[0][1]) / YARD
-            if abs(route.points[-1][0] - route.points[0][0]) > abs(route.points[-1][1] - route.points[0][1]):
-                yards = abs(route.points[-1][0] - route.points[0][0]) / YARD
-            formed = DROP_TITLE.get(self.offense_base or "", "formação")
-            self.set_status(f"Dropback da {formed}, {yards:.1f} jarda(s). A ponta não passa de 5 jardas atrás da linha.")
+            self.set_status(f"Dropback de {yards:.1f} jarda(s) para trás.")
         elif motion is not None:
             self.set_status(f"{label} começa no fim do motion. Os outros só saem quando o motion acaba.")
         else:
@@ -2087,6 +2320,16 @@ class QuadroTatico(tk.Tk):
             self.assign_line("blockrun")
         elif name == "olpass":
             self.assign_line("blockpass")
+        elif name == "drawblock":
+            self.begin_block_path("blockrun")
+        elif name == "drawpass":
+            self.begin_block_path("passe")
+        elif name == "drawrun":
+            self.begin_block_path("rbrun")
+        elif name == "drawmotion":
+            self.begin_block_path("motion")
+        elif name == "drawpa":
+            self.begin_block_path("papass")
         elif name == "runpath":
             self.begin_block_path("blockrun")
         elif name == "passpath":
@@ -2133,33 +2376,6 @@ class QuadroTatico(tk.Tk):
                 return shape
         return None
 
-    def duplicate_play(self) -> None:
-        current = self.name_var.get().strip()
-        suggestion = f"{current} cópia" if current else "Cópia"
-        name = simpledialog.askstring("Duplicar jogada", "Nome da cópia:", initialvalue=suggestion, parent=self)
-        if name is None:
-            return
-        name = name.strip()
-        if not name:
-            self.set_status("A cópia precisa de um nome.")
-            return
-        owner = play_id_for_name(name)
-        if owner is not None:
-            if not messagebox.askyesno("Duplicar jogada", f'Já existe "{name}". Substituir?', parent=self):
-                return
-        document = self.play_document()
-        document["nome"] = name
-        document["id"] = owner
-        self.play_id = store_play(document)
-        self._suspend = True
-        self.name_var.set(name)
-        self._suspend = False
-        self.loaded_id = self.play_id
-        self.mark_clean()
-        self.remember_open()
-        self.refresh_list()
-        self.set_status(f"Cópia salva: {name}. Você está editando a nova jogada.")
-
     def export_image(self) -> None:
         name = self.name_var.get().strip() or "jogada"
         path = filedialog.asksaveasfilename(
@@ -2184,7 +2400,7 @@ class QuadroTatico(tk.Tk):
         image.save(path)
 
     def play_duration(self) -> float:
-        distance = play_distance(self.routes)
+        distance = max(play_distance(self.routes), snap_distance(self.routes) + coverage_clock(self.shapes))
         if distance <= 0:
             return 0.0
         return distance / (PLAY_YARDS_PER_SEC * YARD)
@@ -2380,35 +2596,24 @@ class QuadroTatico(tk.Tk):
         def px(x: float, y: float) -> tuple[float, float]:
             return margin + x * scale, header + margin + (y - FIELD_TOP) * scale
 
-        x0, y0 = px(0, FIELD_TOP)
-        x1, y1 = px(FIELD_W, FIELD_BOTTOM)
-        draw.rectangle((x0, y0, x1, y1), fill="white", outline="#111111", width=3)
-        number_font = font(18, True)
-        for relative in range(FRONT_YARDS, -BACK_YARDS - 1, -1):
-            y = LOS_Y - relative * YARD
-            left, sy = px(0, y)
-            right, _sy = px(FIELD_W, y)
-            if relative == 0:
-                draw.line((left, sy, right, sy), fill="#111111", width=4)
-            elif relative % 5 == 0:
-                draw.line((left, sy, right, sy), fill="#111111", width=3 if relative % 10 == 0 else 2)
-            else:
-                for hx in (HASH_X, FIELD_W - HASH_X):
-                    hx0, hy0 = px(hx, y - 4)
-                    _hx, hy1 = px(hx, y + 4)
-                    draw.line((hx0, hy0, hx0, hy1), fill="#111111", width=2)
-            if relative in (10, 20, 30, 40):
-                label_y = y + 14 if relative == FRONT_YARDS else y
-                draw.text(px(36, label_y), str(relative), fill="#111111", font=number_font, anchor="mm")
-                draw.text(px(FIELD_W - 36, label_y), str(relative), fill="#111111", font=number_font, anchor="mm")
-        ball = px(FIELD_W / 2, LOS_Y)
-        draw.ellipse((ball[0] - 10, ball[1] - 6, ball[0] + 10, ball[1] + 6), fill="#111111")
+        plate = self._field_plate(scale)
+        field_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        field_layer.paste(plate, (margin, header + margin))
+        image = Image.alpha_composite(image.convert("RGBA"), field_layer).convert("RGB")
+        draw = ImageDraw.Draw(image)
         overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
         overlay_draw = ImageDraw.Draw(overlay)
         for shape in shapes:
             if shape.kind != "zone":
                 continue
             rgb = ZONE_TONES.get(shape.tone, ZONE_TONES["amarelo"])[0]
+            link = self._coverage_line(shape, shapes)
+            if link is not None:
+                overlay_draw.line(
+                    (px(link[0], link[1]), px(link[2], link[3])),
+                    fill=(*rgb, 170),
+                    width=max(2, int(2 * scale)),
+                )
             ax, ay = px(shape.x, shape.y)
             bx, by = px(shape.x + shape.w, shape.y + shape.h)
             overlay_draw.ellipse((min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)), fill=(*rgb, ZONE_ALPHA))
@@ -2469,33 +2674,62 @@ class QuadroTatico(tk.Tk):
             ghost = Image.new("RGBA", image.size, (0, 0, 0, 0))
             ghost_draw = ImageDraw.Draw(ghost)
             for shape in shapes:
-                if shape.side != "defesa" or shape.kind == "zone":
+                if shape.side != "defesa" or shape.kind == "zone" or shape.hollow:
                     continue
-                ax, ay = px(shape.x, shape.y)
-                bx, by = px(shape.x + shape.w, shape.y + shape.h)
-                label_font = font(max(11, int(min(shape.w, shape.h) * scale * 0.42)), True)
-                tx0, ty0, tx1, ty1, tx2, ty2 = defense_triangle(ax, ay, bx, by)
-                ghost_draw.polygon(
-                    [(tx0, ty0), (tx1, ty1), (tx2, ty2)],
-                    fill=(212, 212, 212, DEFENSE_ALPHA),
-                    outline=(17, 17, 17, 200),
+                gx, gy, gw, gh = painted_box(shape.x, shape.y, shape.w, shape.h, shape.kind)
+                ax, ay = px(gx, gy)
+                bx, by = px(gx + gw, gy + gh)
+                mark = player_mark(shape.side, shape.kind, shape.text, shape.y + shape.h / 2)
+                self._stamp_mark(
+                    ghost_draw,
+                    mark,
+                    ax,
+                    ay,
+                    bx,
+                    by,
+                    (212, 212, 212, DEFENSE_ALPHA),
+                    (212, 212, 212, 200),
+                    max(2, int(2 * scale)),
                 )
-                if shape.text:
-                    ghost_draw.text(
-                        ((ax + bx) / 2, (ay * 2 + by) / 3),
-                        shape.text,
-                        fill=(17, 17, 17, 220),
-                        font=label_font,
-                        anchor="mm",
-                    )
             image = Image.alpha_composite(image.convert("RGBA"), ghost).convert("RGB")
             draw = ImageDraw.Draw(image)
 
+        blitz_routes = [route for route in routes if route.kind == "blitz"]
+        if blitz_routes:
+            glass = Image.new("RGBA", image.size, (0, 0, 0, 0))
+            glass_draw = ImageDraw.Draw(glass)
+            for route in blitz_routes:
+                screen = [px(point[0], point[1]) for point in route_path(route, routes)]
+                self._paint_blitz_stroke(
+                    glass_draw,
+                    screen,
+                    route_ending(route.kind, route.ending),
+                    BLITZ_ALPHA,
+                    max(3, int(3 * scale)),
+                    max(12, 13 * scale),
+                )
+            if elapsed is not None:
+                traveled = elapsed * PLAY_YARDS_PER_SEC * YARD
+                snap = snap_distance(routes)
+                continued = {item.follow for item in routes if item.follow}
+                dot = max(6, int(7 * scale))
+                ink = (*_hex_rgb(ROUTE_COLOR["blitz"]), BLITZ_ALPHA)
+                for route in blitz_routes:
+                    found = dot_position(route, traveled, snap, continued, routes)
+                    if found is None:
+                        continue
+                    sx, sy = px(found[0], found[1])
+                    glass_draw.ellipse((sx - dot, sy - dot, sx + dot, sy + dot), fill=ink)
+            image = Image.alpha_composite(image.convert("RGBA"), glass).convert("RGB")
+            draw = ImageDraw.Draw(image)
+
         for route in routes:
+            if route.kind == "blitz":
+                continue
             screen = [px(point[0], point[1]) for point in route_path(route, routes)]
             if route.kind == "release" and isinstance(route.split, int) and 0 < route.split < len(screen) - 1:
-                paint_route(screen[: route.split + 1], "bloqueio", "open", route.color)
-                paint_route(screen[route.split :], "passe", route_ending("passe", route.ending), route.color)
+                paint_route(screen[: route.split + 1], "release", "open", None)
+                paint_route(screen[route.split :], "release", route_ending("passe", route.ending), None)
             elif route.kind in ("paroute", "pablock") and isinstance(route.split, int) and 0 < route.split < len(screen) - 1:
                 paint_route(screen[: route.split + 1], "playaction", "open", None)
                 final = "bloqueio" if route.kind == "pablock" else "passe"
@@ -2505,34 +2739,37 @@ class QuadroTatico(tk.Tk):
             else:
                 paint_route(screen, route.kind, route_ending(route.kind, route.ending), route.color)
         for shape in shapes:
-            if shape.kind == "zone" or (under and shape.side == "defesa"):
+            if shape.kind == "zone" or (under and shape.side == "defesa" and not shape.hollow):
                 continue
-            ax, ay = px(shape.x, shape.y)
-            bx, by = px(shape.x + shape.w, shape.y + shape.h)
-            label_font = font(max(11, int(min(shape.w, shape.h) * scale * 0.42)), True)
-            if shape.kind == "x":
-                tx0, ty0, tx1, ty1, tx2, ty2 = defense_triangle(ax, ay, bx, by)
-                draw.polygon([(tx0, ty0), (tx1, ty1), (tx2, ty2)], fill=DEFENSE_FILL, outline="#111111")
-                if shape.text:
-                    draw.text(((ax + bx) / 2, (ay * 2 + by) / 3), shape.text, fill="#111111", font=label_font, anchor="mm")
-            elif shape.kind == "circle":
-                draw.ellipse((ax, ay, bx, by), fill="#111111", outline="#111111", width=3)
-                if shape.text:
-                    draw.text(((ax + bx) / 2, (ay + by) / 2), shape.text, fill="white", font=label_font, anchor="mm")
-            elif shape.kind == "triangle":
-                draw.polygon([(ax + (bx - ax) / 2, ay), (bx, by), (ax, by)], fill="#111111", outline="#111111")
-                if shape.text:
-                    draw.text(((ax + bx) / 2, ay * 0.42 + by * 0.58), shape.text, fill="white", font=label_font, anchor="mm")
+            gx, gy, gw, gh = painted_box(shape.x, shape.y, shape.w, shape.h, shape.kind)
+            ax, ay = px(gx, gy)
+            bx, by = px(gx + gw, gy + gh)
+            stroke = max(3, int(3 * scale))
+            if shape.hollow:
+                self._stamp_outline(draw, shape.kind, ax, ay, bx, by, TOOL_OUTLINE, stroke)
+                continue
+            mark = player_mark(shape.side, shape.kind, shape.text, shape.y + shape.h / 2)
+            defense = shape.side == "defesa" or shape.kind == "x"
+            ink = DEFENSE_FILL if defense else MARK_FILL
+            if mark == "cross":
+                inset_x = (bx - ax) * 0.16
+                inset_y = (by - ay) * 0.16
+                draw.line((ax + inset_x, ay + inset_y, bx - inset_x, by - inset_y), fill=ink, width=stroke + 1)
+                draw.line((ax + inset_x, by - inset_y, bx - inset_x, ay + inset_y), fill=ink, width=stroke + 1)
+            elif mark == "circle":
+                draw.ellipse((ax, ay, bx, by), fill=ink, outline=ink, width=stroke)
+            elif mark == "triangle":
+                draw.polygon([(ax + (bx - ax) / 2, ay), (bx, by), (ax, by)], fill=ink, outline=ink)
             else:
-                draw.rectangle((ax, ay, bx, by), fill="#111111", outline="#111111", width=3)
-                if shape.text:
-                    draw.text(((ax + bx) / 2, (ay + by) / 2), shape.text, fill="white", font=label_font, anchor="mm")
+                draw.rectangle((ax, ay, bx, by), fill=ink, outline=ink, width=stroke)
         if elapsed is not None:
             traveled = elapsed * PLAY_YARDS_PER_SEC * YARD
             snap = snap_distance(routes)
             continued = {item.follow for item in routes if item.follow}
             dot = max(6, int(7 * scale))
             for route in routes:
+                if route.kind == "blitz":
+                    continue
                 found = dot_position(route, traveled, snap, continued, self.routes)
                 if found is None:
                     continue
@@ -2541,20 +2778,25 @@ class QuadroTatico(tk.Tk):
                     continue
                 sx, sy = px(x, y)
                 draw.ellipse((sx - dot, sy - dot, sx + dot, sy + dot), fill=moving_ink(route), outline="#111111", width=2)
+            for x, y, color in coverage_dots(shapes, traveled, snap):
+                if any(self._hides_dot(shape, x, y) for shape in shapes):
+                    continue
+                sx, sy = px(x, y)
+                draw.ellipse((sx - dot, sy - dot, sx + dot, sy + dot), fill=color, outline="#111111", width=2)
             clock = font(max(16, 14 * scale), True)
             small = font(max(13, 11 * scale), True)
-            draw.text(px(FIELD_W - 28, FIELD_TOP + 36), f"{elapsed:.1f} s", fill="#111111", font=clock, anchor="rm")
+            draw.text(px(FIELD_W - 28, FIELD_TOP + 36), f"{elapsed:.1f} s", fill=FIELD_TEXT, font=clock, anchor="rm")
             draw.text(
                 px(FIELD_W - 28, FIELD_TOP + 58),
                 f"jogada {jogada_seconds(elapsed, routes):.1f} s",
-                fill="#111111",
+                fill=FIELD_TEXT,
                 font=small,
                 anchor="rm",
             )
             draw.text(
                 px(FIELD_W - 28, FIELD_TOP + 78),
                 alvo_label(elapsed, routes),
-                fill="#111111",
+                fill=FIELD_TEXT,
                 font=small,
                 anchor="rm",
             )
@@ -2818,6 +3060,53 @@ class QuadroTatico(tk.Tk):
         self.refresh_list()
         self.set_status(f"Jogada salva: {name}")
         return True
+
+    def duplicate_play(self) -> None:
+        current = self.name_var.get().strip()
+        suggestion = f"{current} cópia" if current else ""
+        typed = simpledialog.askstring(
+            "Duplicar jogada",
+            "Nome da nova jogada:",
+            initialvalue=suggestion,
+            parent=self,
+        )
+        if typed is None:
+            return
+        name = typed.strip()
+        if not name:
+            messagebox.showwarning("Nome da jogada", "Dê um nome para a cópia.", parent=self)
+            return
+        owner = play_id_for_name(name)
+        if owner is not None and owner == self.loaded_id:
+            messagebox.showwarning(
+                "Nome da jogada",
+                "Escolha outro nome. Esse já é o desta jogada.",
+                parent=self,
+            )
+            return
+        if owner is not None and not messagebox.askyesno(
+            "Substituir jogada",
+            f'Já existe "{name}". Substituir?',
+            parent=self,
+        ):
+            return
+        document = self.play_document()
+        document["nome"] = name
+        document["id"] = owner
+        try:
+            new_id = store_play(document)
+        except (sqlite3.Error, ValueError) as exc:
+            messagebox.showerror("Duplicar jogada", f"Não foi possível duplicar.\n{exc}", parent=self)
+            return
+        self._suspend = True
+        self.name_var.set(name)
+        self._suspend = False
+        self.play_id = new_id
+        self.loaded_id = new_id
+        self.mark_clean()
+        self.remember_open()
+        self.refresh_list()
+        self.set_status(f"Jogada duplicada: {name}")
 
     def remember_open(self) -> None:
         if self.loaded_id is None:
