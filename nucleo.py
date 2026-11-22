@@ -1179,7 +1179,16 @@ _FORMATION_SEED = (
         "side": "offense",
         "name": "Singleback",
         "key": "singleback",
-        "sets": _ONE_BACK
+        "sets": tuple(
+            _set(
+                "Trips",
+                "trips",
+                "trips à direita: tight end colado na linha, uma jarda atrás. X e Z na linha, os dois recebedores perto dele.",
+            )
+            if key == "trips"
+            else (name, key, text)
+            for name, key, text in _ONE_BACK
+        )
         + (_set("Offset", "dot", "singleback com o running back deslocado para o lado do tight end."),),
     },
     {
@@ -1239,6 +1248,11 @@ def _seed_formations(conn: sqlite3.Connection) -> None:
                 (base_id, key),
             ).fetchone()
             if found:
+                if base["key"] == "singleback" and key == "trips":
+                    conn.execute(
+                        "UPDATE formation_set SET detail = ? WHERE base_id = ? AND key = ?",
+                        (detail, base_id, key),
+                    )
                 continue
             conn.execute(
                 """
@@ -1404,6 +1418,11 @@ def offense_players(base: str, style: str) -> list[tuple[str, str, float, float,
         add("F", slot_l, off)
         add("Z", wide_r, off)
         add("Y", right_te, on)
+    elif base == "singleback" and style == "trips":
+        add("X", wide_l, on)
+        add("Y", right_te, off)
+        add("F", right_te + 32, off)
+        add("Z", right_te + 64, on)
     elif style == "trips":
         add("Y", left_te, on)
         add("A", trips_inner, off)

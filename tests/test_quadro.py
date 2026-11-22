@@ -157,6 +157,28 @@ class TestCampo(unittest.TestCase):
         self.assertGreater(spots["H"][1], spots["QB"][1])
         self.assertNotIn("weak", [key for _name, key in nucleo.OFFENSE_SETS["pistol"]])
 
+    def test_singleback_trips_poe_o_tight_end_fora_da_linha(self) -> None:
+        def spots(base: str) -> dict[str, tuple[float, float]]:
+            return {label: (x, y) for _kind, label, x, y, _size in offense_players(base, "trips")}
+
+        line_y = nucleo.LOS_Y + 8
+        single = spots("singleback")
+        self.assertEqual(single["X"][1], line_y)
+        self.assertEqual(single["Z"][1], line_y)
+        self.assertEqual(single["Y"][1], line_y + nucleo.YARD)
+        self.assertEqual(single["F"][1], line_y + nucleo.YARD)
+        self.assertLess(single["X"][0], 400)
+        self.assertGreater(single["Y"][0], single["RT"][0])
+        self.assertLess(single["Y"][0] - single["RT"][0], 3 * nucleo.YARD)
+        self.assertLess(single["Y"][0], single["F"][0])
+        self.assertLess(single["F"][0], single["Z"][0])
+        self.assertLess(single["Z"][0] - single["Y"][0], 5 * nucleo.YARD)
+        self.assertIn("H", single)
+        pistol = spots("pistol")
+        self.assertEqual(pistol["Y"][1], line_y)
+        self.assertLess(pistol["Y"][0], 400)
+        self.assertNotIn("X", pistol)
+
     def test_ponta_e_o_tipo_da_rota(self) -> None:
         self.assertEqual(route_ending("blockpass"), "bar")
         self.assertEqual(route_ending("passe"), "arrow")
