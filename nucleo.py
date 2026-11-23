@@ -539,7 +539,7 @@ ROUTE_COLOR = {
     "paroute": "#c4b5fd",
     "pablock": "#c4b5fd",
     "papass": "#c4b5fd",
-    "motion": "#bef264",
+    "motion": "#4ade80",
     "dropback": "#fb923c",
     "rbrun": "#ef4444",
     "release": "#60a5fa",
